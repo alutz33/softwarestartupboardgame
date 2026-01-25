@@ -12,8 +12,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Push to personal repo
+        env:
+          PERSONAL_TOKEN: ${{ secrets.PERSONAL_REPO_TOKEN }}
         run: |
-          git remote add personal https://x-access-token:${{ secrets.PERSONAL_REPO_TOKEN }}@github.com/alutz33/softwarestartupboardgame.git
+          git config --global credential.helper store
+          echo "https://alutz33:${PERSONAL_TOKEN}@github.com" > ~/.git-credentials
+          git remote add personal https://github.com/alutz33/softwarestartupboardgame.git
           git push personal main --force
