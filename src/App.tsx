@@ -12,6 +12,7 @@ import {
   GameEnd,
 } from './components/game';
 import { PuzzleGame } from './components/puzzle';
+import { GameRulesHeader } from './components/GameRulesHeader';
 
 function App() {
   const phase = useGameStore((state) => state.phase);
@@ -47,6 +48,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900">
+      <GameRulesHeader />
       {renderPhase()}
     </div>
   );
