@@ -498,6 +498,9 @@ export interface PersonaAuctionState {
   isComplete: boolean;              // Whether auction is resolved
 }
 
+// Draft sub-phase for hybrid auction system (Phase 4)
+export type DraftPhase = 'generic-draft' | 'persona-auction' | 'complete';
+
 export interface RoundState {
   roundNumber: number;
   phase: GamePhase;
@@ -515,6 +518,9 @@ export interface RoundState {
   occupiedActions: Map<ActionType, string[]>; // action -> array of playerIds who have claimed it
   draftOrder: string[]; // player IDs in draft order (lowest MAU first for catch-up)
   personaAuction?: PersonaAuctionState; // Active persona auction
+  // Phase 4: Hybrid auction draft tracking
+  draftPhase?: DraftPhase;              // Which sub-phase of the draft we're in
+  currentDraftPickerIndex?: number;     // Index into draftOrder for whose turn it is to pick
 }
 
 // ============================================

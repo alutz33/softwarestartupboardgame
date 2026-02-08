@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Button, Card, CardContent, Badge, Modal } from '../ui';
+import { Button, Card, CardContent, Badge, Modal, Tooltip } from '../ui';
 import { HelpCard, QuickTip } from '../ui/HelpCard';
 import { PhaseGuide } from '../ui/PhaseGuide';
 import { MilestoneTracker } from '../ui/MilestoneTracker';
@@ -9,9 +9,84 @@ import { ActionSlotIndicator, ActionSlotsLegend } from '../ui/ActionSlotIndicato
 import { ActionPreview, PlayerStatsComparison, YourStats, ActionTips } from '../ui/NoobHelpers';
 import { useGameStore } from '../../state/gameStore';
 import { ACTION_SPACES, getAvailableActions } from '../../data/actions';
+import { getSpecialtyBonus } from '../../data/engineers';
 import { PRODUCT_OPTIONS } from '../../data/corporations';
 import type { ActionType, HiredEngineer, ProductType } from '../../types';
-import { ENGINEER_TRAITS, getTechDebtLevel } from '../../types';
+import { ENGINEER_TRAITS, getTechDebtLevel, AI_POWER_BONUS } from '../../types';
+
+interface PowerBreakdownLine {
+  label: string;
+  value: number;
+}
+
+function calculatePowerBreakdown(
+  engineer: HiredEngineer,
+  techDebt: number,
+): PowerBreakdownLine[] {
+  const lines: PowerBreakdownLine[] = [];
+
+  // Base power from engineer level
+  const levelLabel = engineer.level === 'senior' ? 'Senior' : engineer.level === 'junior' ? 'Junior' : 'Intern';
+  lines.push({ label: `Base power (${levelLabel})`, value: engineer.power });
+
+  // AI augmentation bonus
+  if (engineer.hasAiAugmentation) {
+    lines.push({ label: 'AI augmentation', value: AI_POWER_BONUS });
+  }
+
+  // Specialty bonus (if assigned to an action)
+  if (engineer.assignedAction && engineer.specialty) {
+    const specBonus = getSpecialtyBonus(engineer.specialty, engineer.assignedAction);
+    if (specBonus > 0) {
+      const actionName = ACTION_SPACES.find(a => a.id === engineer.assignedAction)?.name || engineer.assignedAction;
+      lines.push({ label: `Specialty (${engineer.specialty} on ${actionName})`, value: specBonus });
+    }
+  }
+
+  // Trait bonuses
+  if (engineer.trait === 'ai-skeptic') {
+    lines.push({ label: 'AI Skeptic (+1 base)', value: 1 });
+  }
+  if (engineer.trait === 'equity-hungry' && engineer.roundsRetained >= 2) {
+    lines.push({ label: 'Equity-Hungry (2+ rounds)', value: 1 });
+  }
+  if (engineer.trait === 'night-owl') {
+    lines.push({ label: 'Night Owl (last action)', value: 1 });
+  }
+
+  // Persona trait bonuses
+  if (engineer.personaTrait) {
+    lines.push({ label: `Trait: ${engineer.personaTrait.name}`, value: 0 });
+  }
+
+  // Tech debt penalty
+  const debtLevel = getTechDebtLevel(techDebt);
+  if (debtLevel.powerPenalty < 0) {
+    lines.push({ label: 'Tech debt penalty', value: debtLevel.powerPenalty });
+  }
+
+  return lines;
+}
+
+function PowerBreakdownTooltipContent({ lines }: { lines: PowerBreakdownLine[] }) {
+  const total = lines.reduce((sum, l) => sum + l.value, 0);
+  return (
+    <div className="text-left space-y-1 min-w-[180px]">
+      {lines.map((line, i) => (
+        <div key={i} className="flex justify-between gap-4">
+          <span className="text-gray-300">{line.label}</span>
+          <span className={line.value >= 0 ? 'text-green-400' : 'text-red-400'}>
+            {line.value > 0 ? '+' : ''}{line.value}
+          </span>
+        </div>
+      ))}
+      <div className="border-t border-gray-500 pt-1 flex justify-between gap-4 font-semibold">
+        <span className="text-white">Total</span>
+        <span className="text-white">{Math.max(0, total)} power</span>
+      </div>
+    </div>
+  );
+}
 
 function ActionSpaceCard({
   action,
@@ -111,84 +186,92 @@ function EngineerToken({
   isAssigned,
   onClick,
   isSelected,
+  techDebt,
 }: {
   engineer: HiredEngineer;
   isAssigned: boolean;
   onClick: () => void;
   isSelected: boolean;
+  techDebt: number;
 }) {
   const trait = engineer.trait ? ENGINEER_TRAITS[engineer.trait] : null;
+  const breakdownLines = calculatePowerBreakdown(engineer, techDebt);
 
   return (
-    <motion.button
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
-      onClick={onClick}
-      className={`
-        p-3 rounded-lg border-2 transition-all text-left w-full
-        ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-800'}
-        ${isAssigned ? 'opacity-50' : 'hover:border-gray-500'}
-      `}
+    <Tooltip
+      content={<PowerBreakdownTooltipContent lines={breakdownLines} />}
+      position="right"
     >
-      <div className="flex justify-between items-start">
-        <div className="font-medium text-white text-sm">{engineer.name}</div>
-        {engineer.specialty && (
-          <span className="text-[10px] text-gray-500 uppercase">{engineer.specialty}</span>
-        )}
-      </div>
-      <div className="flex gap-1 mt-1 items-center flex-wrap">
-        <Badge
-          size="sm"
-          variant={
-            engineer.level === 'senior'
-              ? 'success'
-              : engineer.level === 'intern'
-                ? 'warning'
-                : 'default'
-          }
-        >
-          {engineer.level === 'senior'
-            ? 'Sr'
-            : engineer.level === 'intern'
-              ? 'Int'
-              : 'Jr'}
-        </Badge>
-        <span className="text-xs text-gray-400">
-          {engineer.power} pwr
-        </span>
-        {/* Engineer Trait Badge */}
-        {trait && (
-          <span title={trait.description}>
-            <Badge
-              size="sm"
-              variant={
-                engineer.trait === 'ai-skeptic' ? 'warning' :
-                engineer.trait === 'equity-hungry' ? 'info' :
-                engineer.trait === 'startup-veteran' ? 'success' :
-                'default'
-              }
-            >
-              {trait.name}
-            </Badge>
-          </span>
-        )}
-      </div>
-      {/* Show rounds retained for equity-hungry */}
-      {engineer.trait === 'equity-hungry' && (
-        <div className="text-[10px] text-yellow-400 mt-1">
-          {engineer.roundsRetained >= 2 ? '+1 power!' : `Retained ${engineer.roundsRetained}/2 quarters`}
-        </div>
-      )}
-      {isAssigned && engineer.assignedAction && (
-        <div className="text-xs text-blue-400 mt-1 flex items-center gap-1">
-          <span>→</span>
-          <span>{ACTION_SPACES.find((a) => a.id === engineer.assignedAction)?.name}</span>
-          {engineer.hasAiAugmentation && (
-            <span className="text-purple-400">+AI</span>
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={onClick}
+        className={`
+          p-3 rounded-lg border-2 transition-all text-left w-full
+          ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-800'}
+          ${isAssigned ? 'opacity-50' : 'hover:border-gray-500'}
+        `}
+      >
+        <div className="flex justify-between items-start">
+          <div className="font-medium text-white text-sm">{engineer.name}</div>
+          {engineer.specialty && (
+            <span className="text-[10px] text-gray-500 uppercase">{engineer.specialty}</span>
           )}
         </div>
-      )}
-    </motion.button>
+        <div className="flex gap-1 mt-1 items-center flex-wrap">
+          <Badge
+            size="sm"
+            variant={
+              engineer.level === 'senior'
+                ? 'success'
+                : engineer.level === 'intern'
+                  ? 'warning'
+                  : 'default'
+            }
+          >
+            {engineer.level === 'senior'
+              ? 'Sr'
+              : engineer.level === 'intern'
+                ? 'Int'
+                : 'Jr'}
+          </Badge>
+          <span className="text-xs text-gray-400">
+            {engineer.power} pwr
+          </span>
+          {/* Engineer Trait Badge */}
+          {trait && (
+            <span title={trait.description}>
+              <Badge
+                size="sm"
+                variant={
+                  engineer.trait === 'ai-skeptic' ? 'warning' :
+                  engineer.trait === 'equity-hungry' ? 'info' :
+                  engineer.trait === 'startup-veteran' ? 'success' :
+                  'default'
+                }
+              >
+                {trait.name}
+              </Badge>
+            </span>
+          )}
+        </div>
+        {/* Show rounds retained for equity-hungry */}
+        {engineer.trait === 'equity-hungry' && (
+          <div className="text-[10px] text-yellow-400 mt-1">
+            {engineer.roundsRetained >= 2 ? '+1 power!' : `Retained ${engineer.roundsRetained}/2 quarters`}
+          </div>
+        )}
+        {isAssigned && engineer.assignedAction && (
+          <div className="text-xs text-blue-400 mt-1 flex items-center gap-1">
+            <span>→</span>
+            <span>{ACTION_SPACES.find((a) => a.id === engineer.assignedAction)?.name}</span>
+            {engineer.hasAiAugmentation && (
+              <span className="text-purple-400">+AI</span>
+            )}
+          </div>
+        )}
+      </motion.button>
+    </Tooltip>
   );
 }
 
@@ -323,13 +406,31 @@ export function PlanningPhase() {
               </div>
             </div>
             <div>
+              <Tooltip content="Monthly Active Users - your player base" position="bottom">
+                <span className="text-xs text-gray-400 border-b border-dotted border-gray-600 cursor-help">MAU</span>
+              </Tooltip>
+              <div className="text-xl font-bold text-blue-400">
+                {currentPlayer.metrics.mau.toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <Tooltip content="User satisfaction, 1-10 scale" position="bottom">
+                <span className="text-xs text-gray-400 border-b border-dotted border-gray-600 cursor-help">Rating</span>
+              </Tooltip>
+              <div className="text-xl font-bold text-yellow-400">
+                {currentPlayer.metrics.rating}/10
+              </div>
+            </div>
+            <div>
               <div className="text-xs text-gray-400">AI Capacity</div>
               <div className="text-xl font-bold text-purple-400">
                 {currentPlayer.resources.aiCapacity}
               </div>
             </div>
             <div>
-              <div className="text-xs text-gray-400">Tech Debt</div>
+              <Tooltip content="Accumulated code issues. -1 power per 4 debt" position="bottom">
+                <span className="text-xs text-gray-400 border-b border-dotted border-gray-600 cursor-help">Tech Debt</span>
+              </Tooltip>
               <MiniDebtIndicator techDebt={currentPlayer.resources.techDebt} />
             </div>
           </div>
@@ -419,6 +520,9 @@ export function PlanningPhase() {
                 <span className="text-xs text-gray-500 font-normal">
                   ({currentPlayer.engineers.length})
                 </span>
+                <Tooltip content="Engineer output contribution per action" position="right">
+                  <span className="text-[10px] text-gray-500 border-b border-dotted border-gray-600 cursor-help">Power?</span>
+                </Tooltip>
               </h2>
               <div className="space-y-2">
                 {currentPlayer.engineers.map((engineer) => (
@@ -428,6 +532,7 @@ export function PlanningPhase() {
                     isAssigned={!!engineer.assignedAction}
                     isSelected={selectedEngineer === engineer.id}
                     onClick={() => handleEngineerClick(engineer.id)}
+                    techDebt={currentPlayer.resources.techDebt}
                   />
                 ))}
                 {currentPlayer.engineers.length === 0 && (

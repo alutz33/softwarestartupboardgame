@@ -16,10 +16,11 @@ import type {
   PersonaAuctionState,
   HiredEngineer,
   SprintPlayerState,
+  DraftPhase,
+  PlanningMode,
 } from '../types';
 import {
   TOTAL_QUARTERS,
-  TECH_DEBT_LEVELS,
   MILESTONE_DEFINITIONS,
   PRODUCTION_CONSTANTS,
   AI_POWER_BONUS,
@@ -114,7 +115,7 @@ function findNextSprintPlayer(
 
 interface GameStore extends GameState {
   // Setup actions
-  initGame: (playerCount: number) => void;
+  initGame: (playerCount: number, planningMode?: PlanningMode) => void;
   setPlayerName: (playerId: string, name: string) => void;
   selectStrategy: (playerId: string, strategy: CorporationStrategy) => void;
   playerReady: (playerId: string) => void;
@@ -137,6 +138,9 @@ interface GameStore extends GameState {
   // Bidding actions
   submitBid: (playerId: string, engineerId: string, amount: number) => void;
   resolveBids: () => void;
+
+  // Phase 4: Hybrid auction draft
+  draftPickEngineer: (playerId: string, engineerId: string) => void;
 
   // Planning actions
   assignEngineer: (
@@ -252,7 +256,7 @@ function createInitialState(): GameState {
 export const useGameStore = create<GameStore>((set, get) => ({
   ...createInitialState(),
 
-  initGame: (playerCount: number) => {
+  initGame: (playerCount: number, planningMode?: PlanningMode) => {
     const players = Array.from({ length: playerCount }, (_, i) =>
       createInitialPlayer(i)
     );
@@ -279,6 +283,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       personaDeck: remainingPersonaDeck,
       dealtLeaderCards,
       quarterlyThemes,
+      planningMode: planningMode || 'simultaneous',
     });
   },
 
@@ -442,6 +447,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
             draftOrder,
             upcomingEvent,
             activeTheme: getThemeForRound(state.quarterlyThemes, 1),
+            // Phase 4: Hybrid auction draft initialization
+            draftPhase: 'generic-draft' as DraftPhase,
+            currentDraftPickerIndex: 0,
           },
         };
       }
@@ -513,6 +521,103 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const activeBidders = auction.biddingOrder.filter(id => !passedSet.has(id));
       const isComplete = activeBidders.length <= 1;
 
+      // If auto-complete in hybrid mode: resolve the winner immediately
+      if (isComplete && state.roundState.draftPhase === 'persona-auction') {
+        const engineerData = personaToEngineer(auction.personaCard);
+
+        let hireCost = amount;
+        if (player.leader?.leaderSide.passive.id === 'lean-efficiency') {
+          hireCost = Math.max(0, hireCost - 5);
+        }
+        if (player.strategy?.funding === 'bootstrapped') {
+          hireCost = Math.round(hireCost * 0.8);
+        }
+
+        const hiredEngineer: HiredEngineer = {
+          ...engineerData,
+          playerId,
+          salaryPaid: hireCost,
+          hasAiAugmentation: false,
+          roundsRetained: 1,
+        };
+
+        const updatedPersonaPool = state.roundState.personaPool.filter(
+          c => c.id !== auction.personaCard.id
+        );
+
+        const updatedPlayers = state.players.map(p => {
+          if (p.id !== playerId) return p;
+          return {
+            ...p,
+            resources: { ...p.resources, money: p.resources.money - hireCost },
+            engineers: [...p.engineers, hiredEngineer],
+          };
+        });
+
+        // Check for more personas to auction
+        if (updatedPersonaPool.length > 0) {
+          const nextPersona = updatedPersonaPool[0];
+          const biddingOrder = [...updatedPlayers]
+            .sort((a, b) => a.metrics.mau - b.metrics.mau)
+            .map(p => p.id);
+
+          const nextAuction: PersonaAuctionState = {
+            personaCard: nextPersona,
+            currentBid: 10,
+            currentBidderId: undefined,
+            passedPlayers: [],
+            biddingOrder,
+            currentBidderIndex: 0,
+            isComplete: false,
+          };
+
+          return {
+            players: updatedPlayers,
+            roundState: {
+              ...state.roundState,
+              personaPool: updatedPersonaPool,
+              personaAuction: nextAuction,
+            },
+          };
+        }
+
+        // No more personas - transition to planning
+        const finalPlayers = updatedPlayers.map(p => {
+          if (p.engineers.length > 0) return { ...p, isReady: false };
+          const intern = generateIntern();
+          let internCost = Math.min(5, p.resources.money);
+          if (p.strategy?.funding === 'bootstrapped') {
+            internCost = Math.round(internCost * 0.8);
+          }
+          return {
+            ...p,
+            isReady: false,
+            resources: { ...p.resources, money: p.resources.money - internCost },
+            engineers: [{
+              ...intern,
+              playerId: p.id,
+              salaryPaid: internCost,
+              hasAiAugmentation: false,
+              roundsRetained: 1,
+            }],
+          };
+        });
+
+        return {
+          players: finalPlayers,
+          phase: 'planning' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'planning' as GamePhase,
+            personaPool: updatedPersonaPool,
+            personaAuction: undefined,
+            draftPhase: 'complete' as DraftPhase,
+            currentBids: new Map(),
+            occupiedActions: new Map(),
+          },
+        };
+      }
+
       return {
         roundState: {
           ...state.roundState,
@@ -541,6 +646,76 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // If all but one passed (or all passed with no bidder), auction is complete
       const isComplete = activeBidders.length <= 1;
 
+      // Helper: transition to next persona auction or to planning phase
+      const finishAuction = (
+        updatedPlayers: Player[],
+        updatedPersonaPool: PersonaCard[],
+      ): Partial<GameState> & { roundState: typeof state.roundState } => {
+        // Check if more persona cards remain to auction
+        if (updatedPersonaPool.length > 0 && state.roundState.draftPhase === 'persona-auction') {
+          const nextPersona = updatedPersonaPool[0];
+          const biddingOrder = [...updatedPlayers]
+            .sort((a, b) => a.metrics.mau - b.metrics.mau)
+            .map(p => p.id);
+
+          const nextAuction: PersonaAuctionState = {
+            personaCard: nextPersona,
+            currentBid: 10,
+            currentBidderId: undefined,
+            passedPlayers: [],
+            biddingOrder,
+            currentBidderIndex: 0,
+            isComplete: false,
+          };
+
+          return {
+            players: updatedPlayers,
+            roundState: {
+              ...state.roundState,
+              personaPool: updatedPersonaPool,
+              personaAuction: nextAuction,
+            },
+          };
+        }
+
+        // No more personas - draft is complete, transition to planning
+        // CS Intern Safety Net: Ensure every player has at least one engineer
+        const finalPlayers = updatedPlayers.map(p => {
+          if (p.engineers.length > 0) return { ...p, isReady: false };
+          const intern = generateIntern();
+          let internCost = Math.min(5, p.resources.money);
+          if (p.strategy?.funding === 'bootstrapped') {
+            internCost = Math.round(internCost * 0.8);
+          }
+          return {
+            ...p,
+            isReady: false,
+            resources: { ...p.resources, money: p.resources.money - internCost },
+            engineers: [{
+              ...intern,
+              playerId: p.id,
+              salaryPaid: internCost,
+              hasAiAugmentation: false,
+              roundsRetained: 1,
+            }],
+          };
+        });
+
+        return {
+          players: finalPlayers,
+          phase: 'planning' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'planning' as GamePhase,
+            personaPool: updatedPersonaPool,
+            personaAuction: undefined,
+            draftPhase: 'complete' as DraftPhase,
+            currentBids: new Map(),
+            occupiedActions: new Map(),
+          },
+        };
+      };
+
       if (isComplete && auction.currentBidderId) {
         // Winner! Convert persona to hired engineer and add to winner's team
         const winner = state.players.find(p => p.id === auction.currentBidderId);
@@ -552,6 +727,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         let hireCost = auction.currentBid;
         if (winner.leader?.leaderSide.passive.id === 'lean-efficiency') {
           hireCost = Math.max(0, hireCost - 5);
+        }
+        // Apply Bootstrapped "Lean Team" power: 20% discount
+        if (winner.strategy?.funding === 'bootstrapped') {
+          hireCost = Math.round(hireCost * 0.8);
         }
 
         const hiredEngineer: HiredEngineer = {
@@ -567,28 +746,46 @@ export const useGameStore = create<GameStore>((set, get) => ({
           c => c.id !== auction.personaCard.id
         );
 
+        const updatedPlayers = state.players.map(p => {
+          if (p.id !== auction.currentBidderId) return p;
+          return {
+            ...p,
+            resources: {
+              ...p.resources,
+              money: p.resources.money - hireCost,
+            },
+            engineers: [...p.engineers, hiredEngineer],
+          };
+        });
+
+        // In hybrid draft mode, auto-advance to next auction or planning
+        if (state.roundState.draftPhase === 'persona-auction') {
+          return finishAuction(updatedPlayers, updatedPersonaPool);
+        }
+
+        // Legacy: just clear the auction
         return {
-          players: state.players.map(p => {
-            if (p.id !== auction.currentBidderId) return p;
-            return {
-              ...p,
-              resources: {
-                ...p.resources,
-                money: p.resources.money - hireCost,
-              },
-              engineers: [...p.engineers, hiredEngineer],
-            };
-          }),
+          players: updatedPlayers,
           roundState: {
             ...state.roundState,
             personaPool: updatedPersonaPool,
-            personaAuction: undefined, // Clear auction
+            personaAuction: undefined,
           },
         };
       }
 
       if (isComplete && !auction.currentBidderId) {
-        // No one bid - card stays in pool but auction ends
+        // No one bid - remove card from pool (nobody wanted it)
+        const updatedPersonaPool = state.roundState.personaPool.filter(
+          c => c.id !== auction.personaCard.id
+        );
+
+        // In hybrid draft mode, auto-advance to next auction or planning
+        if (state.roundState.draftPhase === 'persona-auction') {
+          return finishAuction([...state.players], updatedPersonaPool);
+        }
+
+        // Legacy: just clear the auction
         return {
           roundState: {
             ...state.roundState,
@@ -729,6 +926,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
             draftOrder,
             upcomingEvent,
             activeTheme: getThemeForRound(state.quarterlyThemes, 1),
+            // Phase 4: Hybrid auction draft initialization
+            draftPhase: 'generic-draft' as DraftPhase,
+            currentDraftPickerIndex: 0,
           },
         };
       }
@@ -796,6 +996,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
             draftOrder,
             upcomingEvent,
             activeTheme: getThemeForRound(state.quarterlyThemes, 1),
+            // Phase 4: Hybrid auction draft initialization
+            draftPhase: 'generic-draft' as DraftPhase,
+            currentDraftPickerIndex: 0,
           },
         };
       }
@@ -824,6 +1027,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   resolveBids: () => {
     set((state) => {
+      // Phase 4: If hybrid draft is complete, just transition to planning
+      if (state.roundState.draftPhase === 'complete') {
+        const playersReady = state.players.map(p => ({ ...p, isReady: false }));
+        return {
+          players: playersReady,
+          phase: 'planning' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'planning' as GamePhase,
+            currentBids: new Map(),
+            occupiedActions: new Map(),
+          },
+        };
+      }
+
       const { engineerPool, currentBids } = state.roundState;
       const bidResults: typeof state.roundState.bidResults = [];
       const updatedPlayers = [...state.players];
@@ -964,6 +1182,166 @@ export const useGameStore = create<GameStore>((set, get) => ({
           bidResults,
           currentBids: new Map(),
           occupiedActions: new Map(), // Reset for new planning phase
+        },
+      };
+    });
+  },
+
+  // ============================================
+  // PHASE 4: Hybrid Auction Draft
+  // ============================================
+
+  draftPickEngineer: (playerId: string, engineerId: string) => {
+    set((state) => {
+      const { draftOrder, draftPhase, currentDraftPickerIndex, engineerPool, personaPool } = state.roundState;
+
+      // Verify it's the generic-draft sub-phase
+      if (draftPhase !== 'generic-draft') return state;
+
+      // Verify it's this player's turn
+      const pickerIndex = currentDraftPickerIndex ?? 0;
+      if (draftOrder[pickerIndex] !== playerId) return state;
+
+      // Find the engineer in the pool
+      const engineer = engineerPool.find(e => e.id === engineerId);
+      if (!engineer) return state;
+
+      // Find the player
+      const player = state.players.find(p => p.id === playerId);
+      if (!player) return state;
+
+      // Calculate hire cost (base salary with discounts)
+      let hireCost = engineer.baseSalary;
+
+      // LEADER PASSIVE: lean-efficiency (Silica Su) - hiring costs -$5
+      if (player.leader?.leaderSide.passive.id === 'lean-efficiency') {
+        hireCost = Math.max(0, hireCost - 5);
+      }
+
+      // Apply Bootstrapped "Lean Team" power: 20% discount on hire costs
+      if (player.strategy?.funding === 'bootstrapped') {
+        hireCost = Math.round(hireCost * 0.8);
+      }
+
+      // Check if player can afford
+      if (player.resources.money < hireCost) return state;
+
+      // Create hired engineer
+      const hiredEngineer: HiredEngineer = {
+        ...engineer,
+        playerId,
+        salaryPaid: hireCost,
+        hasAiAugmentation: false,
+        roundsRetained: 1,
+      };
+
+      // Remove engineer from pool
+      const updatedPool = engineerPool.filter(e => e.id !== engineerId);
+
+      // Update player
+      const updatedPlayers = state.players.map(p => {
+        if (p.id !== playerId) return p;
+        return {
+          ...p,
+          resources: {
+            ...p.resources,
+            money: p.resources.money - hireCost,
+          },
+          engineers: [...p.engineers, hiredEngineer],
+        };
+      });
+
+      // Advance to the next player in draft order
+      const nextPickerIndex = pickerIndex + 1;
+
+      // Check if all players have picked (one pick per player per cycle, single cycle)
+      const allPicked = nextPickerIndex >= draftOrder.length;
+      // Also check if no generic engineers remain
+      const noEngineersLeft = updatedPool.length === 0;
+
+      if (allPicked || noEngineersLeft) {
+        // Generic draft is done - check for persona cards to auction
+        if (personaPool.length > 0) {
+          // Transition to persona auction sub-phase
+          // Auto-start auction for first persona card
+          const firstPersona = personaPool[0];
+          const biddingOrder = [...updatedPlayers]
+            .sort((a, b) => a.metrics.mau - b.metrics.mau)
+            .map(p => p.id);
+
+          const auctionState: PersonaAuctionState = {
+            personaCard: firstPersona,
+            currentBid: 10,
+            currentBidderId: undefined,
+            passedPlayers: [],
+            biddingOrder,
+            currentBidderIndex: 0,
+            isComplete: false,
+          };
+
+          return {
+            players: updatedPlayers,
+            roundState: {
+              ...state.roundState,
+              engineerPool: updatedPool,
+              draftPhase: 'persona-auction' as DraftPhase,
+              currentDraftPickerIndex: nextPickerIndex,
+              personaAuction: auctionState,
+            },
+          };
+        }
+
+        // No personas either - draft is complete, transition to planning
+        const playersWithReadyReset = updatedPlayers.map(p => ({
+          ...p,
+          isReady: false,
+        }));
+
+        // CS Intern Safety Net: Ensure every player has at least one engineer
+        for (let i = 0; i < playersWithReadyReset.length; i++) {
+          const p = playersWithReadyReset[i];
+          if (p.engineers.length === 0) {
+            const intern = generateIntern();
+            let internCost = Math.min(5, p.resources.money);
+            if (p.strategy?.funding === 'bootstrapped') {
+              internCost = Math.round(internCost * 0.8);
+            }
+            playersWithReadyReset[i] = {
+              ...p,
+              resources: { ...p.resources, money: p.resources.money - internCost },
+              engineers: [{
+                ...intern,
+                playerId: p.id,
+                salaryPaid: internCost,
+                hasAiAugmentation: false,
+                roundsRetained: 1,
+              }],
+            };
+          }
+        }
+
+        return {
+          players: playersWithReadyReset,
+          phase: 'planning' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            engineerPool: updatedPool,
+            draftPhase: 'complete' as DraftPhase,
+            currentDraftPickerIndex: nextPickerIndex,
+            phase: 'planning' as GamePhase,
+            currentBids: new Map(),
+            occupiedActions: new Map(),
+          },
+        };
+      }
+
+      // Draft continues - next player picks
+      return {
+        players: updatedPlayers,
+        roundState: {
+          ...state.roundState,
+          engineerPool: updatedPool,
+          currentDraftPickerIndex: nextPickerIndex,
         },
       };
     });
@@ -2231,6 +2609,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         draftOrder,
         upcomingEvent, // Show next quarter's event during planning
         activeTheme: getThemeForRound(state.quarterlyThemes, nextRound),
+        // Phase 4: Hybrid auction draft initialization
+        draftPhase: 'generic-draft',
+        currentDraftPickerIndex: 0,
       },
     });
   },
@@ -2271,17 +2652,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Revenue specialist: 50+ points if revenue > all others by 50%
       // Rating specialist: 50+ points if rating > all others by 0.5
 
-      // Tech debt penalty
-      const debtLevel = TECH_DEBT_LEVELS.find(
-        (l) =>
-          player.resources.techDebt >= l.min &&
-          player.resources.techDebt <= l.max
-      );
-      if (debtLevel && debtLevel.min >= 7) {
-        score -= 10; // Penalty for high debt
+      // Tech debt penalty (graduated)
+      // 0-3 debt: no penalty
+      // 4-7 debt: -5 points
+      // 8-11 debt: -10 points
+      // 12+ debt: -20 points
+      const techDebt = player.resources.techDebt;
+      if (techDebt >= 12) {
+        score -= 20;
+      } else if (techDebt >= 8) {
+        score -= 10;
+      } else if (techDebt >= 4) {
+        score -= 5;
       }
 
-      scores.set(player.id, Math.round(score * 10) / 10);
+      // Production track bonus: +1 per MAU production level, +2 per revenue production level
+      score += player.productionTracks.mauProduction * 1;
+      score += player.productionTracks.revenueProduction * 2;
+
+      // Equity multiplier based on funding type
+      // vc-heavy: 40%, angel-backed: 70%, bootstrapped: 100%
+      let equityMultiplier = 1;
+      if (player.strategy?.funding === 'vc-heavy') {
+        equityMultiplier = 0.4;
+      } else if (player.strategy?.funding === 'angel-backed') {
+        equityMultiplier = 0.7;
+      }
+      score = Math.round(score * equityMultiplier);
+
+      scores.set(player.id, score);
     }
 
     // Find winner

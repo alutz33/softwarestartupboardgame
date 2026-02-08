@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button, Card, CardContent } from '../ui';
 import { useGameStore } from '../../state/gameStore';
+import type { PlanningMode } from '../../types';
 
 export function SetupScreen() {
   const [playerCount, setPlayerCount] = useState(2);
+  const [planningMode, setPlanningMode] = useState<PlanningMode>('simultaneous');
   const initGame = useGameStore((state) => state.initGame);
 
   return (
@@ -47,10 +49,52 @@ export function SetupScreen() {
           </CardContent>
         </Card>
 
+        <Card className="mb-6">
+          <CardContent>
+            <h2 className="text-lg font-semibold text-white mb-4">
+              Planning Mode
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setPlanningMode('simultaneous')}
+                className={`
+                  p-4 rounded-lg border-2 transition-all text-left
+                  ${
+                    planningMode === 'simultaneous'
+                      ? 'border-blue-500 bg-blue-900/30 ring-2 ring-blue-400'
+                      : 'border-gray-700 bg-gray-800 hover:border-gray-500'
+                  }
+                `}
+              >
+                <div className="font-bold text-white">Quick Play</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Simultaneous planning, faster rounds
+                </div>
+              </button>
+              <button
+                onClick={() => setPlanningMode('sequential')}
+                className={`
+                  p-4 rounded-lg border-2 transition-all text-left
+                  ${
+                    planningMode === 'sequential'
+                      ? 'border-blue-500 bg-blue-900/30 ring-2 ring-blue-400'
+                      : 'border-gray-700 bg-gray-800 hover:border-gray-500'
+                  }
+                `}
+              >
+                <div className="font-bold text-white">Strategic</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Snake draft, see opponents' moves
+                </div>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Button
           className="w-full"
           size="lg"
-          onClick={() => initGame(playerCount)}
+          onClick={() => initGame(playerCount, planningMode)}
         >
           Start Game
         </Button>

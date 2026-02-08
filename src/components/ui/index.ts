@@ -12,3 +12,4 @@ export { WinCondition, ScoreBreakdown } from './WinCondition';
 export { CatchUpIndicator, DraftOrderBadge } from './CatchUpIndicator';
 export { TechDebtWarning, MiniDebtIndicator } from './TechDebtWarning';
 export { ActionSlotIndicator, ActionSlotsLegend } from './ActionSlotIndicator';
+export { Tooltip } from './Tooltip';
