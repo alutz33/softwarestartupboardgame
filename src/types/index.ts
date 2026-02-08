@@ -181,7 +181,11 @@ export interface Engineer {
   specialty?: 'frontend' | 'backend' | 'fullstack' | 'devops' | 'ai';
   baseSalary: number;
   power: number; // integer power: intern=1, junior=2, senior=4
-  trait?: EngineerTraitType; // Optional unique trait
+  trait?: EngineerTraitType; // Optional generic trait (for generic engineers)
+  // Phase 2: Persona engineer fields
+  isPersona?: boolean;                // true if this is a persona engineer (from dual-sided card)
+  personaId?: PersonaId;              // Which persona card this engineer came from
+  personaTrait?: PersonaEngineerTrait; // Unique named trait (for persona engineers)
 }
 
 export interface HiredEngineer extends Engineer {
@@ -359,7 +363,8 @@ export interface Player {
   color: string;
   isReady: boolean;
   strategy?: CorporationStrategy;
-  startupCard?: StartupCard; // The startup card this player selected
+  startupCard?: StartupCard; // The startup card this player selected (legacy)
+  leader?: PersonaCard; // Phase 2: The persona card chosen as CEO/Founder
   resources: Resources;
   metrics: PlayerMetrics;
   productionTracks: ProductionTracks; // Mars-style production markers
@@ -367,7 +372,8 @@ export interface Player {
   plannedActions: PlannedAction[];
   hasRecruiterBonus: boolean;
   synergiesUnlocked: string[];
-  // Corporation power tracking
+  // Leader/Corporation power tracking
+  leaderPowerUsed: boolean; // Whether the once-per-game leader power has been used
   powerUsesRemaining: number; // For limited-use powers like Pivot
   hasPivoted: boolean; // Track if VC-Heavy has used their pivot
   // IPO/Acquisition tracking for late-game actions
@@ -380,7 +386,9 @@ export interface Player {
 
 export type GamePhase =
   | 'setup'
-  | 'startup-draft'           // New: Terraforming Mars-style startup card selection
+  | 'leader-draft'            // Phase 2: Pick 1 of 3 persona cards as your Leader/CEO
+  | 'funding-selection'       // Phase 2: Choose Funding Type after leader pick
+  | 'startup-draft'           // Legacy: Terraforming Mars-style startup card selection
   | 'corporation-selection'   // Legacy: kept for backwards compatibility
   | 'engineer-draft'
   | 'planning'
@@ -391,10 +399,22 @@ export type GamePhase =
   | 'round-end'
   | 'game-end';
 
+// Persona auction state (for mini-auctions during engineer draft)
+export interface PersonaAuctionState {
+  personaCard: PersonaCard;         // The persona being auctioned
+  currentBid: number;               // Current highest bid
+  currentBidderId?: string;         // Player ID of current highest bidder
+  passedPlayers: string[];          // Players who have passed
+  biddingOrder: string[];           // Order of bidding (lowest MAU first)
+  currentBidderIndex: number;       // Index into biddingOrder
+  isComplete: boolean;              // Whether auction is resolved
+}
+
 export interface RoundState {
   roundNumber: number;
   phase: GamePhase;
   engineerPool: Engineer[];
+  personaPool: PersonaCard[];       // Phase 2: Persona engineers available this round for auction
   currentBids: Map<string, Bid>; // engineerId -> bid
   bidResults: BidResult[];
   currentEvent?: GameEvent;
@@ -403,6 +423,7 @@ export interface RoundState {
   puzzleResults?: PuzzleResult;
   occupiedActions: Map<ActionType, string[]>; // action -> array of playerIds who have claimed it
   draftOrder: string[]; // player IDs in draft order (lowest MAU first for catch-up)
+  personaAuction?: PersonaAuctionState; // Active persona auction
 }
 
 // ============================================
@@ -442,9 +463,12 @@ export interface GameState {
   eventDeck: GameEvent[];
   usedEvents: GameEvent[];
   milestones: Milestone[]; // Track claimed milestones
-  // Startup card draft
+  // Startup card draft (legacy)
   startupDeck: StartupCard[];
   dealtStartupCards: Map<string, StartupCard[]>; // playerId -> dealt cards
+  // Phase 2: Persona card system
+  personaDeck: PersonaCard[];          // Remaining persona cards (shuffled into engineer pool)
+  dealtLeaderCards: Map<string, PersonaCard[]>; // playerId -> dealt leader cards (pick 1 of 3)
   winner?: string;
   finalScores?: Map<string, number>;
 }
@@ -538,4 +562,126 @@ export const AI_DEBT_TABLE: AiDebtByLevel[] = [
 
 export function getAiDebt(level: EngineerLevel): number {
   return AI_DEBT_TABLE.find(e => e.engineerLevel === level)?.techDebtGenerated ?? 2;
+}
+
+// ============================================
+// PERSONA CARDS (Dual-Sided: Leader / Engineer)
+// ============================================
+// Each persona card has two sides:
+// - Leader side: used during game setup (CEO/Founder identity)
+// - Engineer side: used during gameplay (premium hire in draft pool)
+
+export type PersonaId =
+  | 'william-doors'
+  | 'steeve-careers'
+  | 'elom-tusk'
+  | 'jess-bezos'
+  | 'mark-zucker'
+  | 'lora-page'
+  | 'susan-fry'
+  | 'satoshi-nakamaybe'
+  | 'jensen-wattson'
+  | 'sam-chatman'
+  | 'silica-su'
+  | 'binge-hastings'
+  | 'whitney-buzz-herd'
+  | 'marc-cloudoff'
+  | 'gabe-newdeal'
+  | 'jack-blocksey'
+  | 'grace-debugger'
+  | 'brian-spare-key';
+
+// Leader power IDs for the once-per-game abilities
+export type LeaderPowerId =
+  | 'blue-screen-protocol'     // William Doors: opponents skip Optimize Code
+  | 'reality-distortion-field' // Steeve Careers: double all engineer output
+  | 'meme-power'               // Elom Tusk: Go Viral auto-succeeds
+  | 'prime-day'                // Jess Bezos: 3x monetization revenue
+  | 'data-harvest'             // Mark Zucker: steal 2 MAU production
+  | 'moonshot-lab'             // Lora Page: 3x Research AI, no debt
+  | 'ipo-fast-track'           // Susan Fry: score Rev Production x 5
+  | 'decentralize'             // Satoshi: opponents +2 tech debt
+  | 'gpu-tax'                  // Jensen: opponents using AI pay you $5
+  | 'safety-pause'             // Sam Chatman: opponents can't use AI
+  | 'roadmap-execution'        // Silica Su: double Develop Features output
+  | 'binge-drop'               // Binge Hastings: double Develop Features
+  | 'first-move'               // Whitney: claim action slot first
+  | 'acquisition-spree'        // Marc Cloudoff: steal an engineer
+  | 'steam-sale'               // Gabe Newdeal: opponents lose $10
+  | 'dual-pivot'               // Jack Blocksey: change product + extra action
+  | 'compiler-overhaul'        // Grace Debugger: tech debt to zero
+  | 'surge-pricing';           // Brian Spare-key: 3x monetization + rating
+
+// Passive effect IDs (always-on abilities for leaders)
+export type LeaderPassiveId =
+  | 'enterprise-culture'       // William Doors: +1 power on Develop Features
+  | 'perfectionist'            // Steeve Careers: +1 rating every round
+  | 'hype-machine'             // Elom Tusk: +500 MAU any action, ±200 variance
+  | 'infrastructure-empire'    // Jess Bezos: +2 server capacity/round
+  | 'network-effects'          // Mark Zucker: +500 MAU when anyone uses Marketing
+  | 'efficient-ai'             // Lora Page: AI generates 50% less debt
+  | 'ad-network'               // Susan Fry: +$5 income/round
+  | 'immutable-ledger'         // Satoshi: no Marketing, immune to Data Breach
+  | 'gpu-royalties'            // Jensen: Research AI gives +1 AI capacity
+  | 'alignment-tax'            // Sam Chatman: AI no debt, -1 rating if AI used
+  | 'lean-efficiency'          // Silica Su: engineer hiring -$5
+  | 'subscriber-loyalty'       // Binge Hastings: +1 Rev Prod if rating 6+
+  | 'trust-safety'             // Whitney: rating floor 4, Marketing +1 rating
+  | 'saas-compounding'         // Marc Cloudoff: Monetization +1 Rev Prod
+  | 'marketplace-tax'          // Gabe Newdeal: +$3 per opponent Develop Features
+  | 'dual-focus'               // Jack Blocksey: two exclusive actions/round
+  | 'double-optimize'          // Grace Debugger: Optimize Code gives +2 rating
+  | 'crisis-resilience';       // Brian Spare-key: gain MAU when opponents market
+
+export interface LeaderPower {
+  id: LeaderPowerId;
+  name: string;
+  description: string;
+}
+
+export interface LeaderPassive {
+  id: LeaderPassiveId;
+  name: string;
+  description: string;
+}
+
+export interface LeaderStartingBonus {
+  money?: number;              // Extra starting money
+  mauProduction?: number;      // Starting MAU production track position
+  revenueProduction?: number;  // Starting Revenue production track position
+  rating?: number;             // Override starting rating
+  aiCapacity?: number;         // Extra AI capacity
+  techDebt?: number;           // Override starting tech debt
+  serverCapacity?: number;     // Extra server capacity
+}
+
+export interface LeaderSide {
+  title: string;               // e.g. "Founder & Chairman"
+  flavor: string;              // Flavor text quote
+  startingBonus: LeaderStartingBonus;
+  productLock: ProductType[];  // Which product types this leader allows
+  power: LeaderPower;          // Once-per-game ability
+  passive: LeaderPassive;      // Always-on ability
+}
+
+// Unique named trait for persona engineers (different from generic traits)
+export interface PersonaEngineerTrait {
+  name: string;                // e.g. "Philanthropist", "Perfectionist"
+  description: string;         // What the trait does
+}
+
+export interface PersonaEngineerSide {
+  title: string;               // e.g. "Senior Software Architect"
+  flavor: string;              // Flavor text quote
+  level: EngineerLevel;        // Always 'senior' (4 power) for persona engineers
+  power: number;               // Base power (always 4)
+  specialty: Engineer['specialty']; // Fixed specialty
+  trait: PersonaEngineerTrait; // Unique named trait (always present)
+}
+
+export interface PersonaCard {
+  id: PersonaId;
+  name: string;                // Display name e.g. "William Doors"
+  leaderSide: LeaderSide;
+  engineerSide: PersonaEngineerSide;
 }

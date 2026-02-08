@@ -14,6 +14,37 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
     steps: ['Select 2-4 players', 'Click Start Game'],
     tips: ['More players = more competition for action slots!'],
   },
+  'leader-draft': {
+    title: 'Choose Your Leader',
+    emoji: 'Choose Your Leader',
+    description: 'Pick a tech mogul to lead your startup. Each leader has unique powers!',
+    steps: [
+      '1. Review your 3 leader cards',
+      '2. Compare starting bonuses and product locks',
+      '3. Check their once-per-game power',
+      '4. Select one as your CEO/Founder',
+    ],
+    tips: [
+      'Your leader determines your product type',
+      'Unchosen leaders become premium engineers in the draft',
+      'Leader passives are active all game long',
+    ],
+  },
+  'funding-selection': {
+    title: 'Choose Funding',
+    emoji: 'Choose Funding',
+    description: 'Pick your funding strategy to complement your leader.',
+    steps: [
+      '1. Review the three funding types',
+      '2. Consider starting cash vs. special bonuses',
+      '3. Select your funding and confirm',
+    ],
+    tips: [
+      'VC-Heavy: Most cash but only 40% equity',
+      'Bootstrapped: Least cash but revenue scores 2x',
+      'Angel-Backed: Balanced, extra draft picks',
+    ],
+  },
   'startup-draft': {
     title: 'Choose Your Startup',
     emoji: 'Choose Your Startup',

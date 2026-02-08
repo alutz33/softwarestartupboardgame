@@ -11,6 +11,10 @@ import type {
   Milestone,
   ProductType,
   StartupCard,
+  FundingType,
+  PersonaCard,
+  PersonaAuctionState,
+  HiredEngineer,
 } from '../types';
 import {
   TOTAL_QUARTERS,
@@ -34,6 +38,12 @@ import { createEventDeck, checkMitigation } from '../data/events';
 import { getActionSpace, canAffordAction, getAvailableActions } from '../data/actions';
 import { generatePuzzle, executePuzzleSolution, countBlocks } from '../data/puzzles';
 import { createStartupDeck, dealStartupCards, hasAbility } from '../data/startups';
+import {
+  createPersonaDeck,
+  dealLeaderCards,
+  personaToEngineer,
+  drawPersonasForRound,
+} from '../data/personaCards';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -89,6 +99,16 @@ interface GameStore extends GameState {
   setPlayerName: (playerId: string, name: string) => void;
   selectStrategy: (playerId: string, strategy: CorporationStrategy) => void;
   playerReady: (playerId: string) => void;
+
+  // Phase 2: Leader draft & funding selection
+  selectLeader: (playerId: string, personaId: string) => void;
+  selectFunding: (playerId: string, fundingType: FundingType) => void;
+  getDealtLeaderCards: (playerId: string) => PersonaCard[];
+
+  // Phase 2: Persona auction actions
+  startPersonaAuction: (personaCardId: string) => void;
+  placeBid: (playerId: string, amount: number) => void;
+  passAuction: (playerId: string) => void;
 
   // Startup card draft actions
   selectStartupCard: (playerId: string, cardId: string) => void;
@@ -151,7 +171,8 @@ function createInitialPlayer(index: number): Player {
     plannedActions: [],
     hasRecruiterBonus: false,
     synergiesUnlocked: [],
-    // Corporation power tracking
+    // Leader/Corporation power tracking
+    leaderPowerUsed: false,
     powerUsesRemaining: 1, // For powers like Pivot (1 use per game)
     hasPivoted: false,
     ipoBonusScore: 0,
@@ -179,6 +200,7 @@ function createInitialState(): GameState {
       roundNumber: 0,
       phase: 'setup',
       engineerPool: [],
+      personaPool: [],
       currentBids: new Map(),
       bidResults: [],
       occupiedActions: new Map(),
@@ -187,9 +209,12 @@ function createInitialState(): GameState {
     eventDeck: createEventDeck(),
     usedEvents: [],
     milestones: createInitialMilestones(),
-    // Startup card draft
+    // Startup card draft (legacy)
     startupDeck: [],
     dealtStartupCards: new Map(),
+    // Phase 2: Persona card system
+    personaDeck: [],
+    dealtLeaderCards: new Map(),
   };
 }
 
@@ -201,16 +226,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       createInitialPlayer(i)
     );
 
-    // Create and deal startup cards
+    // Phase 2: Create persona deck and deal 3 leader cards per player
+    const personaDeck = createPersonaDeck();
+    const { dealtCards: dealtLeaderCards, remainingDeck: remainingPersonaDeck } =
+      dealLeaderCards(personaDeck, playerCount, 3);
+
+    // Still create startup deck for legacy support
     const startupDeck = createStartupDeck();
-    const { dealtCards, remainingDeck } = dealStartupCards(startupDeck, playerCount, 2);
+    const { dealtCards: dealtStartupCards, remainingDeck: remainingStartupDeck } =
+      dealStartupCards(startupDeck, playerCount, 2);
 
     set({
       ...createInitialState(),
       players,
-      phase: 'startup-draft', // New phase instead of corporation-selection
-      startupDeck: remainingDeck,
-      dealtStartupCards: dealtCards,
+      phase: 'leader-draft', // Phase 2: Start with leader-draft instead of startup-draft
+      startupDeck: remainingStartupDeck,
+      dealtStartupCards,
+      personaDeck: remainingPersonaDeck,
+      dealtLeaderCards,
     });
   },
 
@@ -327,6 +360,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             roundNumber: 1,
             phase: 'engineer-draft' as GamePhase,
             engineerPool,
+            personaPool: [],
             currentBids: new Map(),
             bidResults: [],
             occupiedActions: new Map(),
@@ -392,6 +426,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             roundNumber: 1,
             phase: 'engineer-draft' as GamePhase,
             engineerPool,
+            personaPool: [],
             currentBids: new Map(),
             bidResults: [],
             occupiedActions: new Map(),
@@ -1360,6 +1395,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         roundNumber: nextRound,
         phase: 'engineer-draft',
         engineerPool,
+        personaPool: [],
         currentBids: new Map(),
         bidResults: [],
         occupiedActions: new Map(),
