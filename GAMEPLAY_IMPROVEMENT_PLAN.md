@@ -226,136 +226,217 @@ Instead of complex multipliers, each corporation/funding type simply starts with
 
 **How it works:**
 
-**At game start:**
-- Deal each player 2 engineering cards face-up on the **Leader side**
-- Each player picks 1 to be their corporation's Major Leader (the other goes back to the deck, minor-engineer-side up)
-- Your Major Leader defines your corporation's personality, unique power, and starting bonuses
-- This replaces the tech mogul persona draft AND simplifies corporation setup
+**At game start — Leader Draft:**
+1. Deal 3 Leader cards to each player (face up, **Leader side**)
+2. Each player picks 1 to be their CEO/Founder
+3. Your Major Leader defines your corporation's personality, unique power, starting bonuses, and **product lock** (constrains your starting product type)
+4. Remaining cards get shuffled back into the engineer deck (Leader side hidden)
 
-**Each round (engineer recruitment — building your motley crew):**
-- Draw from the engineering card deck — these come up on the **Minor Engineer side**
-- Each minor engineer is a **named character** with personality, a small unique bonus, and a specialty
-- Recruiting engineers feels like 7 Wonders card drafting: each hire adds a small, specific piece to your engine
-- Over the game, your corporation accumulates a motley crew of distinctive personalities — no two teams look the same
-- The leader side of these cards is hidden/irrelevant once they're in the minor engineer pool
+**Each round — Engineer Recruitment (building your motley crew):**
+
+The engineer draft pool each round contains **two types of cards**:
+
+1. **Generic engineers** (the majority): Standard Intern/Junior/Senior with specialties and the existing trait system (AI Skeptic, Equity-Hungry, etc.). These are the bread-and-butter of your team.
+2. **Persona engineer cards** (1-2 per round): Leftover persona cards from the Leader deck, shuffled in engineer-side-up. These are **premium hires** — they have better stats + a unique named trait. They're the exciting draft picks.
+
+This creates a natural drafting tension: "Do I grab the cheap generic Junior DevOps, or splurge on 'Lora Page' the Senior AI Researcher with a powerful unique trait?"
+
+Over 4 rounds, your corporation accumulates a **motley crew** — a mix of generic workhorses and standout persona characters. No two teams look the same.
 
 **The "Motley Crew" Engine-Building Feel (inspired by 7 Wonders):**
 
-In 7 Wonders, each card you draft gives a small, specific bonus (+1 shield, +1 science symbol, +2 coins). Individually they're minor, but they compound into a unique engine. Our minor engineers work the same way:
+In 7 Wonders, each card you draft gives a small, specific bonus (+1 shield, +1 science symbol, +2 coins). Individually they're minor, but they compound into a unique engine. Our persona engineers work the same way — each is a **slight engine upgrade** rather than a game-warping power. Only the Leader card has a dramatic once-per-game ability.
 
-- Each engineer has a **name and personality** — they're characters, not stat blocks
-- Each has a **small unique perk** on top of their base power and specialty — these perks stack and combo
-- Drafting engineers each round becomes a meaningful engine-building decision: "Do I grab the DevOps engineer with the server bonus, or the AI specialist who reduces tech debt?"
-- By late game, your team of 5-6 named characters feels like YOUR startup's story
+Example crew assembly over a game:
+- **Round 1**: Generic Junior Frontend + persona card **"Satoshi Nakamaybe"** (Backend, passive: tech debt can't exceed 5)
+- **Round 2**: Generic Senior DevOps + **"Lora Page"** (AI, +2 power on Research AI)
+- **Round 3**: Your team is now specialized — AI research covered, infrastructure covered, debt safety net
+- **Round 4**: Final piece — grab **"Susan Fry"** (Monetization expert) to cash out your engine
 
-**Major Leader Card (front):**
-```
-┌─────────────────────────────┐
-│  ★ MAJOR LEADER ★           │
-│                             │
-│  [Character Art]            │
-│                             │
-│  "Elom Tusk"                │
-│  The Chaotic Visionary      │
-│                             │
-│  Starting Bonus:            │
-│  +2 MAU Production          │
-│  +1 AI Capacity             │
-│                             │
-│  Unique Power:              │
-│  MEME POWER - Once/game,    │
-│  Go Viral at 80% success    │
-│                             │
-│  Weakness:                  │
-│  Volatile: ±1 MAU prod/rnd  │
-│                             │
-│  Flavor: "We're going to    │
-│  Mars... eventually."       │
-└─────────────────────────────┘
-```
+---
 
-**Minor Engineer Card (back):**
-```
-┌─────────────────────────────────────┐
-│  ENGINEER                           │
-│                                     │
-│  "Priya Stacktrace"                 │
-│  The Midnight Debugger              │
-│                                     │
-│  Level: Junior  |  Power: 2         │
-│  Salary: $15/round                  │
-│                                     │
-│  Specialty: Frontend                │
-│  +1 power on Develop Features       │
-│                                     │
-│  Perk: NIGHT OWL                    │
-│  +1 power when assigned to the      │
-│  last action slot in a round        │
-│                                     │
-│  Flavor: "The best code happens     │
-│  after everyone else goes home."    │
-└─────────────────────────────────────┘
-```
+#### Detailed Persona Card Specifications
 
-**Example Minor Engineer Roster (showing engine-building variety):**
+Each persona card has two fully designed sides. The **Leader side** is powerful (once/game ability, starting bonuses, product lock). The **Engineer side** is a premium hire (stronger stats and a unique named trait, but no game-warping power).
 
-| Name | Level | Specialty | Perk | Engine Contribution |
-|---|---|---|---|---|
-| **Priya Stacktrace** | Junior | Frontend | Night Owl: +1 power on last action | Rewards careful action ordering |
-| **Chad Brogrammer** | Junior | Backend | Crunch Mode: +2 power but +1 tech debt | High risk/reward burst |
-| **Ava Lightfoot** | Senior | DevOps | Auto-Scale: +1 server capacity each round (passive) | Infrastructure engine |
-| **Raj Pipeline** | Junior | DevOps | CI/CD: -1 tech debt when you Develop Features | Debt control engine |
-| **Kim Pixel** | Intern | Frontend | Viral Design: +1 MAU Production when Marketing | Marketing synergy |
-| **Otto Compiler** | Senior | AI | Deep Learning: AI augmentation costs 0 tech debt | Clean AI engine |
-| **Sam Segfault** | Junior | Fullstack | Jack of All Trades: +1 power on ANY action | Flexible utility |
-| **Morgan Cache** | Senior | Backend | Memoize: Optimize Code gives +2 rating instead of +1 | Rating engine |
-| **Zoe Zeroba** | Intern | AI | Eager Learner: gains +1 power each round (starts at 1) | Scaling investment |
-| **Blake Burndown** | Junior | Fullstack | Sprint Lead: all OTHER engineers on same action get +1 power | Team synergy |
-| **Luna Localhost** | Senior | Frontend | Perfectionist: +2 rating but -1 MAU Production | Quality vs. growth tradeoff |
-| **Dev Nullson** | Intern | Backend | Coffee Machine: costs $0 salary (works for equity) | Economy engine |
-| **Kai Kubernetes** | Junior | DevOps | Orchestrator: server upgrades give +2 capacity instead of +1 | Infra scaling |
-| **Ash Overflow** | Junior | Backend | Copy-Paste: duplicate another engineer's perk this round | Combo enabler |
-| **Nyx Nightly** | Senior | AI | Skynet Protocol: AI actions give +1 to ALL production tracks | Late-game accelerator |
-| **River Refactor** | Junior | Fullstack | Clean Sweep: -2 tech debt when you Pay Down Debt (instead of -1) | Debt clearing engine |
+**WILLIAM DOORS**
 
-**How perks create engine-building:**
-- **Stacking**: Hire Blake Burndown (team synergy) + multiple engineers on the same action = multiplicative power
-- **Combos**: Raj Pipeline (debt control) + Lora Page leader (AI-heavy, +1 debt/round) = neutralize your leader's weakness
-- **Specialization**: Go all-in on DevOps engineers → server infrastructure engine → crash-proof + passive revenue
-- **Counterplay**: See opponents drafting AI engineers → grab Otto Compiler before they do
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Founder & Chairman" | "Senior Software Architect" |
+| **Flavor** | *"640K ought to be enough for anybody... right?"* | *"Has opinions about operating systems"* |
+| **Starting Bonus** | +$20 money, +1 Rev Production, Start Rating 7 | — |
+| **Product Lock** | Must start as B2B SaaS or Platform | — |
+| **Power (once/game)** | **Blue Screen Protocol**: Force all opponents to skip Optimize Code this round | — |
+| **Passive** | All engineers get +1 power on Develop Features | +1 power to ALL actions (generalist) |
+| **Specialty** | — | Backend |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Philanthropist"*: Costs +$10 to hire, but your company gets +$5 income/round while employed |
 
-**Why this works:**
-- **Reduces component count**: One deck of cards serves two purposes
+**STEEVE CAREERS**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Chief Visionary Officer" | "Senior UX Designer" |
+| **Flavor** | *"People don't know what they want until you show it to them"* | *"Will reject your mockup 47 times"* |
+| **Starting Bonus** | Start Rating 8, +$10 extra cash | — |
+| **Product Lock** | Must start as Consumer App | — |
+| **Power (once/game)** | **Reality Distortion Field**: Double the output of ALL your engineers this round | — |
+| **Passive** | +1 rating every round (perfectionist) | +1 power on Marketing actions |
+| **Specialty** | — | Frontend |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Perfectionist"*: Develop Features gives +1 rating but -200 MAU |
+
+**ELOM TUSK**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Technoking" | "Senior AI/Fullstack Engineer" |
+| **Flavor** | *"I'm going to put software on Mars"* | *"Sleeps at the office. Literally."* |
+| **Starting Bonus** | +3 AI Capacity, +2 MAU Production | — |
+| **Product Lock** | None (claims to do everything) | — |
+| **Power (once/game)** | **Meme Power**: Go Viral succeeds automatically (no 50/50) | — |
+| **Passive** | +500 MAU from any action (hype), but ±200 random variance each round | +2 power on Research AI, but AI Augmentation adds +1 extra debt |
+| **Specialty** | — | AI |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Night Owl"* + *"Volatile"*: each round, randomly gain or lose 1 power |
+
+**JESS BEZOS**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "CEO & Optimization Overlord" | "Senior DevOps Engineer" |
+| **Flavor** | *"Your margin is my opportunity"* | *"Will automate your job. And their own."* |
+| **Starting Bonus** | +10 server capacity, +1 Rev Production, Start Rating 4 | — |
+| **Product Lock** | Must start as Platform or B2B SaaS | — |
+| **Power (once/game)** | **Prime Day**: Monetization gives 3× revenue this round | — |
+| **Passive** | +2 free server capacity each round | +1 power on Upgrade Servers and Monetization |
+| **Specialty** | — | DevOps |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Optimizer"*: Pay Down Debt removes 1 extra debt when this engineer is assigned |
+
+**MARK ZUCKER**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Chief Connectivity Officer" | "Senior Growth Engineer" |
+| **Flavor** | *"Move fast and break things... especially privacy"* | *"Knows exactly how many friends you have"* |
+| **Starting Bonus** | +3 MAU Production, Start Rating 4 | — |
+| **Product Lock** | Must start as Consumer App or Platform | — |
+| **Power (once/game)** | **Data Harvest**: Steal 2 MAU Production from the leading player | — |
+| **Passive** | +500 MAU whenever any player uses Marketing (network effects) | +1 power on Develop Features and Marketing |
+| **Specialty** | — | Fullstack |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Growth Hacker"*: When assigned to Marketing, also gives +1 MAU Production |
+
+**LORA PAGE**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Co-Founder & Chief Scientist" | "Senior AI Researcher" |
+| **Flavor** | *"Don't be evil. Be ambitious."* | *"Published 3 papers this sprint instead of writing code"* |
+| **Starting Bonus** | +3 AI Capacity, +1 MAU Production | — |
+| **Product Lock** | Must start as Platform | — |
+| **Power (once/game)** | **Moonshot Lab**: Research AI gives 3× output AND no debt this round | — |
+| **Passive** | AI augmentation generates 50% less debt | +2 power on Research AI, -1 power on Marketing |
+| **Specialty** | — | AI |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Researcher"*: No specialty bonus on non-AI actions, but double bonus on AI actions |
+
+**SUSAN FRY**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Chief Operating Officer" | "Senior Business Analyst" |
+| **Flavor** | *"Revenue isn't a vanity metric if it's recurring"* | *"Has a spreadsheet for her spreadsheets"* |
+| **Starting Bonus** | +2 Rev Production, Start Rating 6 | — |
+| **Product Lock** | Must start as B2B SaaS | — |
+| **Power (once/game)** | **IPO Fast-Track**: Immediately score your current Revenue Production × 5 as bonus points | — |
+| **Passive** | +$5 income per round (Ad Network) | +1 power on Monetization, costs -$5 to hire (bargain) |
+| **Specialty** | — | Backend |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Monetizer"*: Each Monetization action gives +1 Rev Production instead of the usual amount |
+
+**SATOSHI NAKAMAYBE**
+
+| | Leader Side (CEO) | Engineer Side (Hire) |
+|---|---|---|
+| **Title** | "Anonymous Founder" | "Senior Cryptography Engineer" |
+| **Flavor** | *"Trust the protocol, not the corporation"* | *"Nobody knows their real name either"* |
+| **Starting Bonus** | Tech debt capped at 5, +1 all production | — |
+| **Product Lock** | Must start as Platform | — |
+| **Power (once/game)** | **Decentralize**: All opponents gain +2 tech debt | — |
+| **Passive** | Cannot use Marketing action. Immune to Data Breach events. | +1 power on Optimize Code and Research AI |
+| **Specialty** | — | Backend |
+| **Level** | — | Senior (4 power) |
+| **Trait** | — | *"Decentralist"*: Tech debt from AI augmentation is halved (round down) for this engineer |
+
+---
+
+#### Generic Engineers (Bulk of the Draft Pool)
+
+Generic engineers still use the existing system — randomly generated with Level + Specialty + optional Trait (~35% chance). They are the workhorses of your team. Persona cards are the exciting draft picks that appear 1-2 per round.
+
+| Component | Generic Engineers | Persona Engineers |
+|---|---|---|
+| **Names** | Procedural ("Alex B.", "Jordan K.") | Named characters ("Lora Page", "Elom Tusk") |
+| **Levels** | Intern (1 power), Junior (2), Senior (4) | All Senior (4 power) — they're premium |
+| **Specialty** | Random from 5 types | Fixed, thematic to character |
+| **Traits** | ~35% chance of generic trait (AI Skeptic, Night Owl, etc.) | Always have a unique named trait |
+| **Availability** | 3-4 per round in draft pool | 1-2 per round mixed into pool |
+| **Cost** | Standard salary by level | Often premium (+$5-10 hire cost) but worth it |
+
+**Existing generic traits (kept for generic engineers):**
+- AI Skeptic, Equity-Hungry, Startup Veteran, Night Owl — these stay as-is
+
+---
+
+#### How Perks Create Engine-Building
+
+The persona engineer traits are designed as **small engine pieces** (7 Wonders model) that stack and combo:
+
+- **Stacking**: Hire multiple engineers with complementary traits on the same action = compounding bonuses
+- **Combos**: "Lora Page" persona (AI researcher, debt reduction) + Lora Page *leader* (AI-heavy, +1 debt/round) = neutralize your leader's weakness
+- **Specialization**: Go all-in on DevOps persona hires → server infrastructure engine → crash-proof + passive revenue
+- **Counterplay**: See opponents drafting AI engineers → grab "Satoshi Nakamaybe" before they do (debt halving on AI)
+- **Leader synergy**: Each leader's passive creates demand for specific engineer types — Elom Tusk wants AI engineers, Jess Bezos wants DevOps engineers, etc.
+
+---
+
+#### What Gets Kept vs. What Changes
+
+| Current System | Status |
+|---|---|
+| Funding Strategy (VC/Bootstrap/Angel) | **Keep** — still a meaningful starting choice |
+| Tech Approach (AI-First/Quality/Move-Fast) | **Fold into Leader cards** — each Leader implies a tech identity |
+| Product Type (B2B/Consumer/Platform) | **Fold into Leader cards** — Leader has a product lock |
+| 18 Startup Cards (pre-built combos) | **Replace with ~8-10 dual-sided persona cards** |
+| Generic engineers with random traits | **Keep** — they're the majority of the draft pool |
+| Existing 4 traits (AI Skeptic, etc.) | **Keep for generic engineers**. Persona engineers get unique named traits instead |
+
+---
+
+#### Why This Works
+
+- **Reduces component count**: One deck of persona cards serves two purposes (Leader + premium Engineer)
 - **Thematic**: Your leader was once an engineer who founded the company — now they lead a crew of misfits
-- **Simplifies setup**: Pick 1 of 2 leaders instead of navigating a 3x3x3 grid
-- **Adds personality throughout**: Not just turn 1 — every round you meet new named characters
-- **Engine-building depth** (7 Wonders model): Each hire adds a small perk that compounds. By round 4, your team has a distinct identity and synergy
-- **Replayability**: With 16+ minor engineers in the deck, each game surfaces a different pool. You build around what's available, not a predetermined strategy
-- **Scales the deck naturally**: 8 leader designs + 16 minor engineer designs = 24 cards total (or more with expansions)
+- **Simplifies setup**: Pick 1 of 3 leaders instead of navigating a 3x3x3 grid
+- **Adds personality throughout**: Not just turn 1 — persona engineers appear in the draft pool every round as premium picks
+- **Engine-building depth** (7 Wonders model): Each persona hire adds a named trait that compounds. By round 4, your team has a distinct identity and synergy
+- **Generic + Persona mix**: Generic engineers keep costs manageable and decisions quick. Persona engineers are the exciting "should I splurge?" moments
+- **Replayability**: With 8 persona cards and only 1 chosen as leader, 6-7 rotate through the engineer pool each game in different order
 - **Physical production friendly**: Dual-sided cards are standard in board game manufacturing
-
-**Leader roster (replaces both personas AND corporation tech/product modifiers):**
-
-| Leader | Starting Bonuses | Unique Power | Weakness |
-|---|---|---|---|
-| **William Doors** | +1 Rev Production, Start Rating 7 | **Blue Screen**: Once/game, all opponents -1 MAU Production for 1 round | -1 power on Marketing actions |
-| **Steeve Careers** | +1 Rating (start 7), $10 extra cash | **Reality Distortion**: Once/game, double Marketing output | All costs +$5 |
-| **Jess Bezos** | +2 Server Capacity, +1 Rev Production | **Prime Day**: Once/game, convert server capacity to MAU (cap × 50) | Start Rating 4 |
-| **Elom Tusk** | +2 MAU Production, +1 AI Capacity | **Meme Power**: Once/game, Go Viral at 80% success | Volatile: ±1 MAU production randomly each round |
-| **Mark Zucker** | +3 MAU Production | **Data Harvest**: Once/game, steal 2 MAU Production from leader | Start Rating 4 (privacy issues) |
-| **Lora Page** | +3 AI Capacity, +1 MAU Production | **Moonshot**: Once/game, Research AI gives 3x output | +1 tech debt per round (feature bloat) |
-| **Susan Fry** | +2 Rev Production, +1 Rating | **Ad Network**: Passive +$5 income per round | -1 power on Develop Features |
-| **Satoshi Nakamaybe** | Tech debt capped at 5, +1 all production | **Decentralize**: Once/game, all opponents +2 tech debt | Cannot use Marketing action |
+- **Scales naturally**: 8 personas for base game, add more in expansions without changing any systems
 
 **Impact on codebase:**
-- `src/data/engineers.ts`: Complete rewrite — each card is a named character with `leaderSide` and `engineerSide` data; replace random generation with curated roster of 16+ named engineers
-- `src/data/personas.ts` (was planned): **Not needed** — leader data lives on the card, engineer personas live on the flip side
-- `src/data/corporations.ts`: Drastically simplified (see 1.5)
-- `src/types/index.ts`: Add `LeaderCard` type, add `EngineerPersona` with `name`, `title`, `perk`, `flavorText`; modify `EngineerCard` to be dual-sided
-- New component: `src/components/game/LeaderDraft.tsx`
-- New component: `src/components/game/EngineerCard.tsx` — displays named character with art, perk description, flavor text
-- Modify: `src/components/game/CorporationSelection.tsx` → simplified to leader pick + funding choice
-- Modify: `src/state/gameStore.ts` — perk resolution during `resolveActions()`, perk-specific passive effects at round start/end
+- `src/data/engineers.ts`: **Keep** generic engineer generation (Intern/Junior/Senior + random specialty + ~35% trait). Add logic to shuffle 1-2 persona cards into each round's draft pool.
+- New file: `src/data/personaCards.ts`: Define ~8 dual-sided persona cards with full `leaderSide` and `engineerSide` data (starting bonuses, product locks, powers, traits, flavor text)
+- `src/data/corporations.ts`: Drastically simplified (see 1.5) — product locks come from Leader cards now
+- `src/types/index.ts`: Add `PersonaCard` type with `leaderSide: LeaderData` and `engineerSide: PersonaEngineerData`; add `productLock` field; keep existing `Engineer` type for generics
+- New component: `src/components/game/LeaderDraft.tsx` — show 3 persona cards on Leader side, pick 1
+- New component: `src/components/game/PersonaEngineerCard.tsx` — premium hire display with named trait, flavor text
+- Modify: `src/components/game/CorporationSelection.tsx` → simplified to Leader draft + Funding pick
+- Modify: `src/state/gameStore.ts` — Leader power activation, product lock enforcement, persona trait resolution during `resolveActions()`, persona passive effects at round start/end
 
 ---
 
@@ -367,9 +448,11 @@ In 7 Wonders, each card you draft gives a small, specific bonus (+1 shield, +1 s
 
 **Setup flow (new):**
 ```
-1. Deal 2 Leader cards to each player → pick 1 (return other to engineer deck)
-2. Choose Funding Type: VC-Heavy, Bootstrapped, or Angel-Backed
-3. Done. Start playing.
+1. Deal 3 Leader cards to each player (Leader side up) → pick 1 as CEO/Founder
+2. Return unchosen cards to engineer deck (shuffled in, Engineer side up)
+3. Leader's product lock determines your product type automatically
+4. Choose Funding Type: VC-Heavy, Bootstrapped, or Angel-Backed
+5. Done. Start playing.
 ```
 
 **Funding Types (streamlined):**
@@ -382,7 +465,7 @@ In 7 Wonders, each card you draft gives a small, specific bonus (+1 shield, +1 s
 
 **What happened to Tech Approach and Product Type?**
 - **Tech Approach** (AI-First, Quality-Focused, Move-Fast): Folded into Leader cards. Lora Page IS the AI-First approach. Steeve Careers IS Quality-Focused. Elom Tusk IS Move-Fast. The leader's starting bonuses and powers encode the same strategic identity.
-- **Product Type** (B2B SaaS, Consumer App, Platform Play): Folded into Leader powers and starting production values. Jess Bezos is inherently B2B/infrastructure. Mark Zucker is inherently Consumer. The multipliers are replaced by production track starting positions.
+- **Product Type** (B2B SaaS, Consumer App, Platform Play): Folded into Leader **product locks**. Each leader constrains which product type(s) you can start as (e.g., Jess Bezos → B2B/Platform, Mark Zucker → Consumer/Platform, Steeve Careers → Consumer). The multipliers are replaced by production track starting positions.
 
 **Why this works:**
 - **Faster setup**: 2 decisions instead of 3 (and the leader pick is fun, not analytical)
@@ -669,9 +752,11 @@ Phase 5 (Polish):
 
 8. **Physical vs. digital card design:** Dual-sided cards work naturally for physical production. In the digital version, how do we represent the "flip" — show both sides in a modal? Tab interface? The leader side needs prominent display during the game since it defines your identity.
 
-9. **Engineer deck size vs. game length:** With 16+ named engineers and 4 rounds of drafting ~2-3 per player per round, a 4-player game needs ~24-32 engineer draws. The deck needs enough cards that not all engineers appear every game (replayability) but not so many that favorites rarely show up. Sweet spot is probably 20-24 minor engineer designs for base game.
+9. **Persona card distribution per round:** With 8 persona cards total and 1 claimed as Leader, 7 remain in the engineer deck. At 1-2 persona cards per round over 4 rounds, that's 4-8 persona appearances. In a 4-player game, not every player gets a persona hire every round — that's intentional scarcity (makes them exciting draft picks). But is 1-2 per round the right frequency? Too rare = forgettable. Too common = generics feel pointless.
 
-10. **Perk power level:** Some perks are passive (Ava Lightfoot's +1 server/round compounds over 4 rounds) while others are situational (Chad Brogrammer's Crunch Mode). Need to ensure passive perks on cheaper interns/juniors don't outclass expensive senior one-shot perks. The 7 Wonders approach: weaker cards are more common, powerful cards are rarer in the deck.
+10. **Persona engineer pricing:** All persona engineers are Senior (4 power) with a unique trait. Should they cost more to hire than generic Seniors? A premium hire cost (+$5-10) creates a meaningful "is this worth it?" decision. Or should the trait itself carry the downside (like Elom Tusk's engineer side adding extra debt)?
+
+11. **Product lock flexibility:** Each leader has a product lock (e.g., "Must start as B2B SaaS or Platform"). Should this be a hard constraint or a soft one (e.g., "may start as anything, but gets +1 production if B2B/Platform")? Hard locks reduce combinatorics but add identity. Soft locks preserve choice at the cost of one more thing to weigh during setup.
 
 ---
 
