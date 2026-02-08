@@ -27,18 +27,21 @@ The core loop (Draft → Plan → Resolve → Event × 4 rounds) has strong bone
 | # | Change | Addresses |
 |---|--------|-----------|
 | 1.1 | Streamline math to integer bonuses | Calculative friction |
-| 1.2 | Rework puzzle into inclusive "Sprint" mini-game | Puzzle mismatch |
-| 1.3 | Add visual company progression system | Abstract growth |
-| 1.4 | Make planning phase sequential (draft-style) | Weak interaction |
+| 1.2 | Mars-style resource production tracking | Calculative friction, abstract growth |
+| 1.3 | Integer rating system (1-10 scale, no decimals) | Calculative friction |
+| 1.4 | Dual-sided engineering cards (Leader / Minor Engineers) | Theme, setup complexity |
+| 1.5 | Simplified corporation selection (Leader + Funding Type) | Setup complexity, decision paralysis |
+| 1.6 | Rework puzzle into inclusive "Sprint" mini-game | Puzzle mismatch |
+| 1.7 | Add visual company progression system | Abstract growth |
+| 1.8 | Make planning phase sequential (draft-style) | Weak interaction |
 
 ### Tier 2: Depth & Theme (Medium Impact)
 
 | # | Change | Addresses |
 |---|--------|-----------|
-| 2.1 | Tech mogul parody personas | Theme/flavor |
-| 2.2 | Quarterly themes with unique modifiers | Same-y rounds |
-| 2.3 | Dynamic events with player response choices | Passive events |
-| 2.4 | Recurring revenue engine system | Flat economy |
+| 2.1 | Quarterly themes with unique modifiers | Same-y rounds |
+| 2.2 | Dynamic events with player response choices | Passive events |
+| 2.3 | Recurring revenue engine system | Flat economy |
 
 ### Tier 3: Polish & Balance (Lower Priority)
 
@@ -101,7 +104,255 @@ Junior engineer: base power 2
 
 ---
 
-### 1.2 Rework Puzzle → "Sprint" Mini-Game
+### 1.2 Mars-Style Resource Production Tracking
+
+**Inspiration:** Terraforming Mars uses a simple, elegant production tracking system. Each resource (MegaCredits, Steel, Titanium, Plants, Energy, Heat) has a **production track** — a single token that slides up and down a numbered track. At the start of each generation, you produce resources equal to your production value. No multiplication chains, no formulas to remember. You just look at where your token sits.
+
+**Problem:** Our current system calculates MAU, revenue, and rating through complex formulas involving chained multipliers (corporation type × action effects × engineer productivity × tech debt penalty). Players can't predict outcomes or plan strategically because the math is opaque.
+
+**Solution:** Adopt a Terraforming Mars-style **production track** for each key metric. Each player has three production markers that move up and down a track:
+
+**Production Tracks:**
+
+| Track | Range | Produces | How It Moves |
+|---|---|---|---|
+| **MAU Production** | 0-20 | +N × 200 MAU per round | Develop Features: +1, Marketing: +2, Go Viral: +3 on success |
+| **Revenue Production** | 0-15 | +N × $5 income per round | Monetization: +1, Partnership: +1, MRR from server infra: automatic |
+| **Rating Track** | 1-10 | Final scoring (10 pts per point) | Optimize Code: +1, Monetization: -1, Events: varies |
+
+**How it works in play:**
+1. At the start of each round, each player **produces** resources equal to their production marker positions
+2. Actions during the round **move the markers** up or down by fixed integer amounts
+3. Players can see at a glance: "My MAU production is at 6, so I'll gain 1,200 MAU next round"
+4. No hidden multipliers, no chained calculations — just move the token
+
+**Example round flow:**
+```
+Start of Round 2:
+  MAU Production marker at: 4  → Gain +800 MAU
+  Revenue Production at: 2     → Gain +$10
+  Rating at: 6                 → (scoring only, no production)
+
+During Round 2:
+  Assign engineer to Develop Features → MAU Production moves 4 → 5
+  Assign engineer to Monetization     → Revenue Production moves 2 → 3, Rating moves 6 → 5
+
+Start of Round 3:
+  MAU Production marker at: 5  → Gain +1,000 MAU
+  Revenue Production at: 3     → Gain +$15
+```
+
+**Corporation type determines starting production values:**
+Instead of complex multipliers, each corporation/funding type simply starts with different production marker positions (see section 1.5).
+
+**Tech debt affects production:**
+- At 4+ debt: -1 to MAU production (marker slides down)
+- At 8+ debt: -1 to Revenue production as well
+- At 12+ debt: -1 to Rating as well
+- These penalties are applied/removed dynamically as debt changes, moving the markers
+
+**Why this works:**
+- **Tangible**: Players physically move a token — they SEE their engine growing
+- **Predictable**: "My production is 5, I'll gain 1,000 MAU" — no calculator needed
+- **Proven**: Terraforming Mars is one of the most successful strategy games ever, and this system is a core reason why
+- **Engine-building satisfaction**: Watching your production markers climb creates the compounding growth feeling currently missing
+- **Replaces MRR subsystem**: The revenue production track IS the recurring revenue engine (eliminates need for separate 2.4 MRR system)
+
+**Impact on codebase:**
+- `src/types/index.ts`: Add `ProductionTrack` type with `mauProduction`, `revenueProduction` fields; Rating becomes integer
+- `src/state/gameStore.ts`: Add `produceResources()` at round start; `resolveActions()` modifies production markers instead of direct resource values
+- `src/data/actions.ts`: Change action effects to production marker deltas (e.g., `mauProductionDelta: +1`)
+- `src/data/corporations.ts`: Replace multipliers with starting production positions
+- New component: `src/components/game/ProductionBoard.tsx` — visual track display per player
+
+---
+
+### 1.3 Integer Rating System (No Decimals)
+
+**Problem:** The current rating system uses a 1.0-5.0 decimal scale with +0.1/-0.1 increments. This creates several issues:
+- Decimal math is harder to reason about mentally
+- "+0.1 rating" feels insignificant and unsatisfying
+- 50 discrete steps (1.0 to 5.0 in 0.1 increments) is an awkward granularity
+- Doesn't align with the integer power system from 1.1
+
+**Solution:** Replace with a **1-10 integer scale**. No decimals anywhere in the game.
+
+**New Rating Scale:**
+
+| Rating | Star Display | Meaning |
+|---|---|---|
+| 1-2 | 1 star | Terrible — users actively warn others away |
+| 3-4 | 2 stars | Poor — functional but frustrating |
+| 5-6 | 3 stars | Average — gets the job done |
+| 7-8 | 4 stars | Good — users recommend it |
+| 9-10 | 5 stars | Excellent — category leader |
+
+**Rating changes become whole numbers:**
+- Optimize Code: +1 rating
+- Monetization: -1 rating
+- Marketing (with good product): +1 rating
+- Data Breach (unmitigated): -2 rating
+- DDoS (unmitigated): -1 rating
+- Competitor Launch (unmitigated): -1 rating
+
+**Starting ratings by corporation type:**
+- B2B SaaS: Start at 5 (average, business users are more forgiving)
+- Consumer App: Start at 6 (slightly above average, consumer polish expected)
+- Platform Play: Start at 5 (balanced)
+
+**Scoring:** 5 points per rating point (max 50 at rating 10)
+
+**Benefits:**
+- Whole numbers are easier to track and reason about
+- "+1 rating" feels meaningful and tangible
+- Aligns with the integer power system
+- The 1-10 scale maps naturally to "star ratings" (divide by 2)
+- No fractional tokens needed for physical play
+
+**Impact on codebase:**
+- `src/types/index.ts`: `rating: number` stays but constrain to integer 1-10
+- `src/data/corporations.ts`: Replace decimal rating modifiers with integers
+- `src/data/actions.ts`: Replace all `+0.1`/`-0.1` with `+1`/`-1`
+- `src/data/events.ts`: Replace `-0.3`, `-0.5` with `-1`, `-2`
+- `src/state/gameStore.ts`: Remove decimal rounding logic, clamp to 1-10
+
+---
+
+### 1.4 Dual-Sided Engineering Cards (Major Leader / Minor Engineers)
+
+**Problem:** The current system has separate concepts for corporation identity and engineers that don't connect thematically. Corporations are built from a 3x3x3 grid (27 combinations) which causes decision paralysis during setup. Engineer cards are purely mechanical with no personality.
+
+**Solution:** Engineering cards are **dual-sided**. One side is a **Major Leader** character, the other side is a **Minor Engineer**.
+
+**How it works:**
+
+**At game start:**
+- Deal each player 2 engineering cards face-up on the **Leader side**
+- Each player picks 1 to be their corporation's Major Leader (the other goes back to the deck, minor-engineer-side up)
+- Your Major Leader defines your corporation's personality, unique power, and starting bonuses
+- This replaces the tech mogul persona draft AND simplifies corporation setup
+
+**Each round (engineer recruitment):**
+- Draw from the engineering card deck — these come up on the **Minor Engineer side**
+- Minor engineers are the standard hires: Intern, Junior, Senior with specialties
+- The leader side of these cards is hidden/irrelevant once they're in the minor engineer pool
+
+**Major Leader Card (front):**
+```
+┌─────────────────────────────┐
+│  ★ MAJOR LEADER ★           │
+│                             │
+│  [Character Art]            │
+│                             │
+│  "Elom Tusk"                │
+│  The Chaotic Visionary      │
+│                             │
+│  Starting Bonus:            │
+│  +2 MAU Production          │
+│  +1 AI Capacity             │
+│                             │
+│  Unique Power:              │
+│  MEME POWER - Once/game,    │
+│  Go Viral at 80% success    │
+│                             │
+│  Weakness:                  │
+│  Volatile: ±1 MAU prod/rnd  │
+│                             │
+│  Flavor: "We're going to    │
+│  Mars... eventually."       │
+└─────────────────────────────┘
+```
+
+**Minor Engineer Card (back):**
+```
+┌─────────────────────────────┐
+│  ENGINEER                   │
+│                             │
+│  Level: Junior              │
+│  Power: 2                   │
+│  Salary: $15/round          │
+│                             │
+│  Specialty: Frontend        │
+│  +1 power on Dev Features   │
+│                             │
+│  Trait: Night Owl           │
+│  +1 power on last action    │
+└─────────────────────────────┘
+```
+
+**Why this works:**
+- **Reduces component count**: One deck of cards serves two purposes
+- **Thematic**: Your leader was once an engineer who founded the company
+- **Simplifies setup**: Pick 1 of 2 leaders instead of navigating a 3x3x3 grid
+- **Adds personality from turn 1**: Every game has a named character leading your company
+- **Scales the deck naturally**: 8 leader designs = 8 cards that double as 8 minor engineers when not chosen as leaders
+- **Physical production friendly**: Dual-sided cards are standard in board game manufacturing
+
+**Leader roster (replaces both personas AND corporation tech/product modifiers):**
+
+| Leader | Starting Bonuses | Unique Power | Weakness |
+|---|---|---|---|
+| **William Doors** | +1 Rev Production, Start Rating 7 | **Blue Screen**: Once/game, all opponents -1 MAU Production for 1 round | -1 power on Marketing actions |
+| **Steeve Careers** | +1 Rating (start 7), $10 extra cash | **Reality Distortion**: Once/game, double Marketing output | All costs +$5 |
+| **Jess Bezos** | +2 Server Capacity, +1 Rev Production | **Prime Day**: Once/game, convert server capacity to MAU (cap × 50) | Start Rating 4 |
+| **Elom Tusk** | +2 MAU Production, +1 AI Capacity | **Meme Power**: Once/game, Go Viral at 80% success | Volatile: ±1 MAU production randomly each round |
+| **Mark Zucker** | +3 MAU Production | **Data Harvest**: Once/game, steal 2 MAU Production from leader | Start Rating 4 (privacy issues) |
+| **Lora Page** | +3 AI Capacity, +1 MAU Production | **Moonshot**: Once/game, Research AI gives 3x output | +1 tech debt per round (feature bloat) |
+| **Susan Fry** | +2 Rev Production, +1 Rating | **Ad Network**: Passive +$5 income per round | -1 power on Develop Features |
+| **Satoshi Nakamaybe** | Tech debt capped at 5, +1 all production | **Decentralize**: Once/game, all opponents +2 tech debt | Cannot use Marketing action |
+
+**Impact on codebase:**
+- `src/data/engineers.ts`: Add `leaderSide` data to card definitions; restructure as dual-sided
+- `src/data/personas.ts` (was planned): **Not needed** — leader data lives on the card
+- `src/data/corporations.ts`: Drastically simplified (see 1.5)
+- `src/types/index.ts`: Add `LeaderCard` type, modify `EngineerCard` to include `leaderSide`
+- New component: `src/components/game/LeaderDraft.tsx`
+- Modify: `src/components/game/CorporationSelection.tsx` → simplified to leader pick + funding choice
+
+---
+
+### 1.5 Simplified Corporation Selection
+
+**Problem:** The current 3×3×3 grid (Funding × Tech Approach × Product Type = 27 combinations) is overwhelming during setup. Players spend too long analyzing combinations before the game even starts. Many combinations feel samey. The tech approach and product type choices are really about identity/strategy, which is now handled by the Major Leader card (1.4).
+
+**Solution:** Corporation selection becomes just **two choices**: your **Major Leader** (from 1.4) and your **Funding Type**.
+
+**Setup flow (new):**
+```
+1. Deal 2 Leader cards to each player → pick 1 (return other to engineer deck)
+2. Choose Funding Type: VC-Heavy, Bootstrapped, or Angel-Backed
+3. Done. Start playing.
+```
+
+**Funding Types (streamlined):**
+
+| Funding | Starting Cash | Starting Production | Special Rule |
+|---|---|---|---|
+| **VC-Heavy** | $100 | MAU: 0, Rev: 0, Rating: per leader | +2 Marketing power. Can pivot (change leader power target) once/game. 40% equity. |
+| **Bootstrapped** | $40 | MAU: 1, Rev: 1, Rating: per leader | Revenue scores 2x at end. -20% hiring costs. 100% equity. |
+| **Angel-Backed** | $70 | MAU: 0, Rev: 0, Rating: per leader | +1 engineer capacity. See +2 extra engineers during draft. 70% equity. |
+
+**What happened to Tech Approach and Product Type?**
+- **Tech Approach** (AI-First, Quality-Focused, Move-Fast): Folded into Leader cards. Lora Page IS the AI-First approach. Steeve Careers IS Quality-Focused. Elom Tusk IS Move-Fast. The leader's starting bonuses and powers encode the same strategic identity.
+- **Product Type** (B2B SaaS, Consumer App, Platform Play): Folded into Leader powers and starting production values. Jess Bezos is inherently B2B/infrastructure. Mark Zucker is inherently Consumer. The multipliers are replaced by production track starting positions.
+
+**Why this works:**
+- **Faster setup**: 2 decisions instead of 3 (and the leader pick is fun, not analytical)
+- **Character-driven**: "I'm playing as Elom Tusk with VC funding" tells a story. "I chose VC-Heavy + Move-Fast + Consumer App" does not.
+- **Same strategic depth**: The leader card encodes the strategic differentiation that tech approach + product type used to provide
+- **Cleaner mental model**: Funding is about resources/constraints. Leader is about strategy/identity. Two orthogonal axes instead of three overlapping ones.
+
+**Impact on codebase:**
+- `src/data/corporations.ts`: Remove tech approach and product type arrays; keep funding types only
+- `src/types/index.ts`: Simplify `Corporation` type — remove `techApproach`, `productType`; add `leader: LeaderCard`
+- `src/components/game/CorporationSelection.tsx`: Redesign to two-step flow (Leader draft → Funding pick)
+- `src/state/gameStore.ts`: Remove corporation combination logic; apply leader bonuses at game start
+
+---
+
+### 1.6 Rework Puzzle → "Sprint" Mini-Game
+
+**(Unchanged from original 1.2 — renumbered)**
 
 **Problem:** The coding puzzle (path-finding with code blocks) is:
 - A completely different genre from the strategic planning game
@@ -145,7 +396,7 @@ Every player who assigned engineers to "Optimize Code" participates. But ALL pla
 
 ---
 
-### 1.3 Visual Company Progression System
+### 1.7 Visual Company Progression System
 
 **Problem:** Company growth is just numbers changing. No sense of building something.
 
@@ -190,7 +441,7 @@ Each player has a visual company dashboard showing:
 
 ---
 
-### 1.4 Sequential Action Drafting (Replace Blind Simultaneous Planning)
+### 1.8 Sequential Action Drafting (Replace Blind Simultaneous Planning)
 
 **Problem:** Simultaneous planning means slot competition is resolved by luck/speed, not strategy. No reading opponents, no bluffing, no counter-play.
 
@@ -229,41 +480,9 @@ Each player has a visual company dashboard showing:
 
 ## Tier 2: Detailed Specifications
 
-### 2.1 Tech Mogul Parody Personas
+### 2.1 Quarterly Themes
 
-**Concept:** Replace generic corporation names with parody tech mogul characters. Each persona has a name, personality, strengths/weaknesses, and a unique ability.
-
-**Example Personas:**
-
-| Parody Name | Based On | Personality | Strength | Weakness | Unique Power |
-|---|---|---|---|---|---|
-| **William Doors** | Bill Gates | Methodical, philanthropic | Software (+1 power all dev actions) | Slow to market (-1 power marketing) | **Blue Screen**: Once/game, force all opponents to lose 1 round of server uptime |
-| **Steeve Careers** | Steve Jobs | Perfectionist, visionary | Design/Rating (+0.2 rating/round) | Expensive taste (all costs +$5) | **Reality Distortion**: Once/game, double marketing effect |
-| **Jess Bezos** | Jeff Bezos | Relentless, data-driven | Infrastructure (+2 free server capacity/round) | Low rating start (2.5 instead of 3.0) | **Prime Day**: Once/game, convert server capacity to MAU (cap × 50) |
-| **Elom Tusk** | Elon Musk | Chaotic, ambitious | Hype/MAU (+500 MAU from any action) | Volatile (random -200 to +200 MAU each round) | **Meme Power**: Once/game, Go Viral with 75% success rate instead of 50% |
-| **Mark Zucker** | Mark Zuckerberg | Data-focused, growth-obsessed | User growth (MAU ×1.5) | Privacy issues (-0.3 rating start) | **Data Harvest**: Once/game, steal 10% of leading opponent's MAU |
-| **Lora Page** | Larry Page | Research-driven, moonshot thinker | AI capacity (+3 starting AI) | Feature bloat (+1 debt/round) | **Moonshot**: Once/game, Research AI gives 3× normal output |
-| **Susan Fry** | Susan Wojcicki / Sheryl Sandberg | Operations maven, monetization expert | Revenue (+50% monetization) | Low innovation (-1 power dev features) | **Ad Network**: Passive +$5 income per round from ad revenue |
-| **Satoshi Nakamaybe** | Satoshi Nakamoto | Mysterious, decentralized | Tech debt immunity (max 5 debt) | No marketing ability (can't use Marketing action) | **Decentralize**: Once/game, all opponents gain +2 tech debt |
-
-**Implementation approach:**
-- Personas replace the current Corporation Selection (funding + tech + product)
-- Each persona bundles a pre-set combination + a unique power + flavor text
-- Players draft personas instead of building a corporation from 3×3×3 options
-- Reduces setup complexity while adding personality
-- Can still have 2 personas dealt per player (pick 1, like startup cards)
-
-**OR** (lighter touch): Keep corporation selection as-is, but add a persona as a **fourth choice** that provides flavor + one unique ability. This preserves the strategic depth of the 3×3×3 grid while adding character.
-
-**Impact on codebase:**
-- New file: `src/data/personas.ts`
-- Modify: `src/types/index.ts` - add `Persona` type
-- Modify: `src/components/game/CorporationSelection.tsx` or new `PersonaDraft.tsx`
-- Modify: `src/state/gameStore.ts` - integrate persona powers
-
----
-
-### 2.2 Quarterly Themes
+**(Note: Tech Mogul Parody Personas have been folded into section 1.4 — Major Leader cards. The persona roster now lives on the leader side of dual-sided engineering cards, eliminating the need for a separate persona system.)**
 
 **Problem:** All 4 rounds feel mechanically identical. Only late-game action unlocks differentiate rounds 3-4.
 
@@ -284,7 +503,7 @@ Each player has a visual company dashboard showing:
 
 ---
 
-### 2.3 Dynamic Events with Response Choices
+### 2.2 Dynamic Events with Response Choices
 
 **Problem:** Events resolve automatically based on thresholds. No player agency.
 
@@ -305,9 +524,9 @@ Each player has a visual company dashboard showing:
 | Response | Effect | Cost |
 |---|---|---|
 | **Invest in Recovery** | Reduce negative effects by 50% | $15 |
-| **Exploit the Chaos** | Ignore event, gain +500 MAU (steal competitors' users) | Risk: 30% chance of -0.3 rating backlash |
+| **Exploit the Chaos** | Ignore event, gain +500 MAU (steal competitors' users) | Risk: 30% chance of -1 rating backlash |
 | **Hunker Down** | Default: take the normal effect | Free |
-| **PR Campaign** | Convert negative event into +0.2 rating (spin the narrative) | $20 |
+| **PR Campaign** | Convert negative event into +1 rating (spin the narrative) | $20 |
 
 **Impact on codebase:**
 - Modify: `src/data/events.ts` - add `MarketShift` type, add response options to crises
@@ -317,41 +536,18 @@ Each player has a visual company dashboard showing:
 
 ---
 
-### 2.4 Recurring Revenue Engine
+### 2.3 Recurring Revenue Engine
 
 **Problem:** Economy doesn't compound. No engine-building satisfaction. Money comes and goes without growth feeling.
 
-**Solution:** Add **Monthly Recurring Revenue (MRR)** as a persistent income stream that grows over time.
+**Status:** Largely addressed by the Mars-style Production Track system (1.2). The Revenue Production track IS the recurring revenue engine — it grows as players take Monetization actions, and pays out every round. The explicit MRR resource is no longer needed as a separate concept.
 
-**How it works:**
-- Each Monetization action now adds both one-time revenue AND +$5 MRR
-- MRR pays out at the start of each round (before engineer draft)
-- Server upgrades also contribute: each 5 server capacity = +$2 MRR (hosting fees)
-- Some startup cards/personas grant starting MRR
-- MRR is shown on the Company Dashboard as a growing line graph
+**Remaining value:** If additional engine-building depth is desired beyond the production track, consider:
+- Server infrastructure contributing to Revenue Production automatically (+1 Rev Production per 10 server capacity)
+- Some Leader cards granting starting Revenue Production (Susan Fry's Ad Network)
+- Startup cards that boost production track movement rates
 
-**New resource:**
-```typescript
-resources: {
-  money: number,
-  mrr: number,        // NEW: pays out each round
-  serverCapacity: number,
-  aiCapacity: number,
-  techDebt: number,
-}
-```
-
-**Balance implications:**
-- Starting money can be reduced since MRR provides ongoing income
-- Income cap formula changes: cap applies to MAU-based income only, MRR is uncapped
-- Creates meaningful early-game investment decisions: "Monetize now for MRR, or grow first?"
-- Late-game MRR compounds to feel like a real business engine
-
-**Impact on codebase:**
-- Modify: `src/types/index.ts` - add `mrr` to Resources
-- Modify: `src/state/gameStore.ts` - MRR payout at round start, Monetization adds MRR
-- Modify: `src/data/actions.ts` - Monetization effect includes MRR gain
-- Modify: `src/components/game/RoundEnd.tsx` - show MRR growth
+**Impact on codebase:** Mostly handled by 1.2 implementation. No separate MRR resource needed.
 
 ---
 
@@ -363,12 +559,13 @@ resources: {
 - Already feasible with existing Tailwind setup
 
 ### 3.2 Rebalance Scoring
-After integer power conversion, rebalance the scoring formula:
+After integer power conversion and production tracks, rebalance the scoring formula:
 - MAU: 1 point per 1,000 (keep)
-- Revenue: 1 point per 500 (keep, but MRR changes revenue scale)
-- Rating: 10 points per star (keep)
+- Revenue: 1 point per 500 (keep, production track changes revenue curve)
+- Rating: 5 points per rating point on the 1-10 scale (max 50)
 - Debt penalty: -3 points per debt level above 3 (graduated, not cliff)
 - Milestone bonuses: keep but adjust values based on new action economy
+- Production track positions may also factor into scoring (reward engine-building)
 
 ### 3.3 Market Conditions (Passive Layer)
 - Persistent global modifiers that change each round
@@ -381,38 +578,49 @@ After integer power conversion, rebalance the scoring formula:
 ## Implementation Priority & Sequencing
 
 ```
-Phase 1 (Foundation):
-  1.1 Integer power system     ← Everything else depends on this
+Phase 1 (Foundation — do these together, they're deeply interconnected):
+  1.1 Integer power system          ← All math depends on this
+  1.2 Mars-style production tracks  ← Core resource engine, replaces multiplier chains
+  1.3 Integer rating (1-10)         ← Eliminates last decimals from the game
 
-Phase 2 (Core Loop):
-  1.4 Sequential action draft  ← Biggest gameplay feel change
-  1.2 Sprint mini-game         ← Can be built independently
-  2.2 Quarterly themes         ← Layered on top of action system
+Phase 2 (Identity & Setup):
+  1.4 Dual-sided engineering cards  ← Leader/engineer card design
+  1.5 Simplified corporations      ← Leader + Funding only (depends on 1.4)
 
-Phase 3 (Depth):
-  2.1 Parody personas          ← Flavor layer, independent
-  2.3 Dynamic events           ← Builds on existing event system
-  2.4 Recurring revenue        ← Economy rework
+Phase 3 (Core Loop):
+  1.8 Sequential action draft      ← Biggest gameplay feel change
+  1.6 Sprint mini-game             ← Can be built independently
+  2.1 Quarterly themes             ← Layered on top of action system
 
-Phase 4 (Polish):
-  1.3 Visual progression       ← Art/animation heavy, do last
-  3.1-3.3 Balance & polish     ← After all mechanics are stable
+Phase 4 (Depth):
+  2.2 Dynamic events               ← Builds on existing event system
+  2.3 Recurring revenue engine     ← Mostly handled by production tracks already
+
+Phase 5 (Polish):
+  1.7 Visual progression           ← Art/animation heavy, do last
+  3.1-3.3 Balance & polish         ← After all mechanics are stable
 ```
 
 ---
 
 ## Open Questions for Discussion
 
-1. **Personas vs. Corporation Builder:** Should parody personas REPLACE the 3×3×3 corporation selection, or be an additional layer on top of it? Replacing simplifies setup but reduces strategic combinations from 27 to ~8.
+1. **~~Personas vs. Corporation Builder~~** → RESOLVED: Leaders are on dual-sided engineering cards (1.4). Corporations simplified to Leader + Funding (1.5). The 3×3×3 grid is eliminated. Strategic depth comes from the Leader roster (8 leaders × 3 funding types = 24 combinations, each with distinct identity).
 
-2. **Sprint mini-game scope:** Should non-Optimize-Code players also draw tokens (smaller pool) to stay engaged? Or keep it exclusive to Optimize Code players but make it fast enough that idle time is minimal?
+2. **Production track granularity:** Are the production track ranges (MAU: 0-20, Revenue: 0-15, Rating: 1-10) right? Too few steps means actions don't feel impactful enough. Too many means the track is fiddly. Terraforming Mars uses wide ranges (TR: 20-80+), but our game is only 4 rounds.
 
-3. **Sequential planning timing:** With 4 players and 3+ engineers each, sequential placement is 12+ picks per round. Is this too slow? Should we do 2 engineers per pick, or group picks?
+3. **Sprint mini-game scope:** Should non-Optimize-Code players also draw tokens (smaller pool) to stay engaged? Or keep it exclusive to Optimize Code players but make it fast enough that idle time is minimal?
 
-4. **Quarterly theme flexibility:** Should quarterly themes be fixed (always same order) or drawn randomly? Fixed = more learnable; random = more replayable.
+4. **Sequential planning timing:** With 4 players and 3+ engineers each, sequential placement is 12+ picks per round. Is this too slow? Should we do 2 engineers per pick, or group picks?
 
-5. **Backward compatibility:** Should we preserve the simultaneous planning mode as a "Quick Play" option for players who prefer speed over interaction?
+5. **Quarterly theme flexibility:** Should quarterly themes be fixed (always same order) or drawn randomly? Fixed = more learnable; random = more replayable.
+
+6. **Backward compatibility:** Should we preserve the simultaneous planning mode as a "Quick Play" option for players who prefer speed over interaction?
+
+7. **Leader card balance:** With leaders encoding what used to be three separate choices (tech approach + product type + persona), each leader is doing a lot of work. Need playtesting to ensure no leader is dominant. The 8-leader roster should be expandable over time.
+
+8. **Physical vs. digital card design:** Dual-sided cards work naturally for physical production. In the digital version, how do we represent the "flip" — show both sides in a modal? Tab interface? The leader side needs prominent display during the game since it defines your identity.
 
 ---
 
-*Plan created from issue feedback citing: Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks/Arks (purchasable initiative), Captain Sonar (skill-gap warning).*
+*Plan created from issue feedback citing: Terraforming Mars (production tracks, corporation identity), Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks/Arks (purchasable initiative), Captain Sonar (skill-gap warning).*
