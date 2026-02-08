@@ -517,7 +517,7 @@ Every player who assigned engineers to "Optimize Code" participates. But ALL pla
 - Quick to resolve (30 seconds per player)
 - Still rewards the Optimize Code action with meaningful choices
 
-**Non-participants:** Players who didn't choose Optimize Code can observe and trash-talk (social element). Keep the phase short enough that it doesn't drag.
+**Non-participants get one free draw:** Players who didn't assign engineers to Optimize Code still get **1 draw** from the commit token bag. This keeps everyone engaged during the phase — you might get a free Clean Code token (+1 debt reduction), or you might draw a Bug (no effect since you can't bust with one draw). It's a tiny bonus that keeps eyes on the table without diluting the advantage of committing engineers to Optimize Code.
 
 **Impact on codebase:**
 - `src/data/puzzles.ts`: Replace puzzle templates with sprint token distributions
@@ -601,11 +601,20 @@ Each player has a visual company dashboard showing:
 - Optional 30-second timer per placement to keep the game moving
 - Auto-assigns to "Pay Down Debt" if timer expires
 
+**Quick Play Mode (parallel planning):**
+
+Preserved as an alternative for groups who prefer speed over interaction:
+- All players assign engineers simultaneously (current system, blind)
+- Plans are revealed at the same time; slot conflicts resolved by MAU tiebreaker (lowest MAU gets priority)
+- Faster rounds but less player interaction — good for casual games, learning the rules, or impatient groups
+- Toggle in game setup: "Planning Mode: Sequential (recommended) / Quick Play (parallel)"
+- Both modes use the same action slot system, same resolution logic — only the assignment phase differs
+
 **Impact on codebase:**
-- `src/state/gameStore.ts`: Replace `lockPlan()` / `revealPlans()` with `claimActionSlot(playerId, engineerId, actionType, useAI)`
-- `src/components/game/PlanningPhase.tsx`: Major rework - show all players' boards, highlight current picker, animate placements
-- Remove: `RevealPhase.tsx` (no longer needed - actions are visible as placed)
-- `src/types/index.ts`: Add `currentPickerIndex`, `pickOrder` to `RoundState`
+- `src/state/gameStore.ts`: Replace `lockPlan()` / `revealPlans()` with `claimActionSlot(playerId, engineerId, actionType, useAI)` for sequential mode; keep existing `lockPlan()` for Quick Play mode behind a `planningMode` toggle
+- `src/components/game/PlanningPhase.tsx`: Major rework — show all players' boards, highlight current picker, animate placements in sequential mode; retain simultaneous UI for Quick Play mode
+- Remove: `RevealPhase.tsx` (no longer needed in sequential mode — actions are visible as placed. In Quick Play, reveal still happens but uses simplified conflict resolution)
+- `src/types/index.ts`: Add `currentPickerIndex`, `pickOrder` to `RoundState`; add `planningMode: 'sequential' | 'parallel'` to `GameConfig`
 
 ---
 
@@ -617,20 +626,35 @@ Each player has a visual company dashboard showing:
 
 **Problem:** All 4 rounds feel mechanically identical. Only late-game action unlocks differentiate rounds 3-4.
 
-**Solution:** Each round has a **"Market Condition"** theme that modifies available actions and rewards.
+**Solution:** Each round has a **"Market Condition"** theme that modifies available actions and rewards. Themes are **randomized** each game (inspired by Parks, where trail sites are shuffled each playthrough), so players can't memorize a fixed "Round 2 always has cheap Marketing" pattern.
 
-| Round | Theme | Modifier | Thematic Justification |
-|---|---|---|---|
-| **Q1: Launch Quarter** | "The Startup Boom" | Develop Features gives +50% output. Monetization unavailable. Hiring costs -$5. | You're building your MVP. Investors want product, not revenue. |
-| **Q2: Growth Quarter** | "Market Expansion" | Marketing costs halved ($10). New action: **Partnership Deal** ($15, gain +500 MAU and +$10/round recurring). | Time to find your market fit. |
-| **Q3: Scale Quarter** | "The Reckoning" | All server costs doubled. Tech debt penalties increase by 1 tier. Go Viral unlocks. Monetization gives 1.5×. | Infrastructure strain and pressure to monetize. |
-| **Q4: Exit Quarter** | "IPO Window" | IPO Prep and Acquisition unlock. All milestones worth +5 bonus points. Rating matters 2× for scoring. | Final push. Every metric matters for your exit. |
+**Theme Pool (draw 4 at game start, assign randomly to Rounds 1-4):**
+
+| Theme | Modifier | Thematic Justification |
+|---|---|---|
+| **"The Startup Boom"** | Develop Features gives +50% output. Monetization unavailable. Hiring costs -$5. | Building your MVP. Investors want product, not revenue. |
+| **"Market Expansion"** | Marketing costs halved ($10). New action: **Partnership Deal** ($15, gain +500 MAU and +$10/round recurring). | Time to find your market fit. |
+| **"The Reckoning"** | All server costs doubled. Tech debt penalties increase by 1 tier. Go Viral unlocks. Monetization gives 1.5×. | Infrastructure strain and pressure to monetize. |
+| **"IPO Window"** | IPO Prep and Acquisition unlock. All milestones worth +5 bonus points. Rating matters 2× for scoring. | Final push. Every metric matters for your exit. |
+| **"AI Gold Rush"** | Research AI costs halved. AI augmentation gives +1 extra power. But +1 tech debt on all AI actions. | The hype cycle is real. |
+| **"Talent War"** | All engineer salaries +$5. But draft pool has +2 extra engineers to choose from. Persona engineers appear guaranteed. | Competition for talent heats up. |
+| **"Regulatory Crackdown"** | Players with >8K MAU must pay $15 compliance fee. Optimize Code gives double output. Rating penalties are doubled. | Government notices your industry. |
+| **"Bubble Market"** | All income +$10. Marketing gives 2× MAU. But end-of-round: 25% chance of market correction (-$20 all players). | Easy money... while it lasts. |
+
+**How randomization works (Parks model):**
+1. At game start, shuffle the theme deck and deal 4 themes face-up
+2. All players can see all 4 themes for the entire game (full information)
+3. Themes are assigned to rounds in the order dealt: Theme 1 → Round 1, Theme 2 → Round 2, etc.
+4. Players can plan ahead knowing what's coming — the strategy is in adapting to *this game's* specific theme order
+5. Some themes are harder in early rounds, easier in late rounds (and vice versa) — the randomization creates different strategic landscapes each game
+
+**Late-game action unlocks** (IPO Prep, Acquisition, Go Viral) are still round-gated as before — they unlock at their designated round regardless of which theme is active. If "IPO Window" theme lands on Round 2, the milestone scoring bonus applies but IPO Prep itself isn't available until Round 4.
 
 **Impact on codebase:**
-- New file: `src/data/quarters.ts` - define quarterly modifiers
-- Modify: `src/data/actions.ts` - `getAvailableActions()` considers quarterly modifiers
-- Modify: `src/state/gameStore.ts` - `resolveActions()` applies quarterly multipliers
-- Modify: `src/components/game/PlanningPhase.tsx` - display current quarter theme
+- New file: `src/data/quarters.ts` - define theme pool (8+ themes), shuffle logic
+- Modify: `src/data/actions.ts` - `getAvailableActions()` considers active theme modifiers
+- Modify: `src/state/gameStore.ts` - shuffle themes at game start, store in `gameState.themeOrder`; `resolveActions()` applies theme modifiers
+- Modify: `src/components/game/PlanningPhase.tsx` - display all 4 themes with current round highlighted
 
 ---
 
@@ -736,28 +760,39 @@ Phase 5 (Polish):
 
 ## Open Questions for Discussion
 
+### Resolved
+
 1. **~~Personas vs. Corporation Builder~~** → RESOLVED: Leaders are on dual-sided engineering cards (1.4). Corporations simplified to Leader + Funding (1.5). The 3×3×3 grid is eliminated. Strategic depth comes from the Leader roster (8 leaders × 3 funding types = 24 combinations, each with distinct identity).
 
-2. **Production track granularity:** Are the production track ranges (MAU: 0-20, Revenue: 0-15, Rating: 1-10) right? Too few steps means actions don't feel impactful enough. Too many means the track is fiddly. Terraforming Mars uses wide ranges (TR: 20-80+), but our game is only 4 rounds.
+2. **~~Production track granularity~~** → ACCEPTED: Current ranges (MAU: 0-20, Revenue: 0-15, Rating: 1-10) are fine for a 4-round game. Will revisit during playtesting if movement feels too coarse or too fiddly.
 
-3. **Sprint mini-game scope:** Should non-Optimize-Code players also draw tokens (smaller pool) to stay engaged? Or keep it exclusive to Optimize Code players but make it fast enough that idle time is minimal?
+3. **~~Sprint mini-game scope~~** → RESOLVED: Non-participants get **1 free draw** from the commit token bag. Keeps everyone engaged without diluting the Optimize Code action's value. Updated in section 1.6.
 
-4. **Sequential planning timing:** With 4 players and 3+ engineers each, sequential placement is 12+ picks per round. Is this too slow? Should we do 2 engineers per pick, or group picks?
+4. **~~Sequential planning timing~~** → ACCEPTED: 12+ picks per round is fine — it's the core interaction loop and creates the tension the game needs. Quick Play (parallel) mode available for groups who want speed. The bigger unresolved question is the engineer *auction* system (see #7 below).
 
-5. **Quarterly theme flexibility:** Should quarterly themes be fixed (always same order) or drawn randomly? Fixed = more learnable; random = more replayable.
+5. **~~Quarterly theme flexibility~~** → RESOLVED: **Randomized** each game, Parks-style. Shuffle theme deck at start, deal 4 face-up so all themes are visible (full information). Players adapt to this game's specific theme order. Updated in section 2.1 with an expanded pool of 8 themes.
 
-6. **Backward compatibility:** Should we preserve the simultaneous planning mode as a "Quick Play" option for players who prefer speed over interaction?
+6. **~~Backward compatibility~~** → RESOLVED: **Yes**, keep Quick Play mode. Parallel simultaneous planning with MAU-based tiebreaker for slot conflicts. Toggle in game setup. Updated in section 1.8.
 
-7. **Leader card balance:** With leaders encoding what used to be three separate choices (tech approach + product type + persona), each leader is doing a lot of work. Need playtesting to ensure no leader is dominant. The 8-leader roster should be expandable over time.
+### Open
 
-8. **Physical vs. digital card design:** Dual-sided cards work naturally for physical production. In the digital version, how do we represent the "flip" — show both sides in a modal? Tab interface? The leader side needs prominent display during the game since it defines your identity.
+7. **Engineer auction/bidding system:** The current engineer draft uses a simple "pick from a pool" model, but the *bidding mechanic* is unresolved. Options:
+   - **(A) Blind parallel bids:** Each player secretly bids salary for the engineers they want. Highest bidder wins ties. Fast but less interactive.
+   - **(B) Open ascending auction:** Players take turns bidding up salaries on visible engineers. More interactive but slower. Creates interesting "let them overpay" dynamics.
+   - **(C) Draft pick order:** Lowest-MAU player picks first from the pool (no bidding, just priority). Simple but may feel flat.
+   - **(D) Hybrid:** Generic engineers use draft pick order (fast). Persona engineers trigger a mini-auction when they appear (exciting for premium hires only).
+   - This interacts heavily with the sequential planning system — if engineer recruitment is already sequential, adding an auction on top might feel like too much waiting. But if recruitment is parallel/blind, an auction adds the missing interaction.
 
-9. **Persona card distribution per round:** With 8 persona cards total and 1 claimed as Leader, 7 remain in the engineer deck. At 1-2 persona cards per round over 4 rounds, that's 4-8 persona appearances. In a 4-player game, not every player gets a persona hire every round — that's intentional scarcity (makes them exciting draft picks). But is 1-2 per round the right frequency? Too rare = forgettable. Too common = generics feel pointless.
+8. **Leader card balance:** With leaders encoding what used to be three separate choices (tech approach + product type + persona), each leader is doing a lot of work. Need playtesting to ensure no leader is dominant. The 8-leader roster should be expandable over time.
 
-10. **Persona engineer pricing:** All persona engineers are Senior (4 power) with a unique trait. Should they cost more to hire than generic Seniors? A premium hire cost (+$5-10) creates a meaningful "is this worth it?" decision. Or should the trait itself carry the downside (like Elom Tusk's engineer side adding extra debt)?
+9. **Physical vs. digital card design:** Dual-sided cards work naturally for physical production. In the digital version, how do we represent the "flip" — show both sides in a modal? Tab interface? The leader side needs prominent display during the game since it defines your identity.
 
-11. **Product lock flexibility:** Each leader has a product lock (e.g., "Must start as B2B SaaS or Platform"). Should this be a hard constraint or a soft one (e.g., "may start as anything, but gets +1 production if B2B/Platform")? Hard locks reduce combinatorics but add identity. Soft locks preserve choice at the cost of one more thing to weigh during setup.
+10. **Persona card distribution per round:** With 8 persona cards total and 1 claimed as Leader, 7 remain in the engineer deck. At 1-2 persona cards per round over 4 rounds, that's 4-8 persona appearances. In a 4-player game, not every player gets a persona hire every round — that's intentional scarcity (makes them exciting draft picks). But is 1-2 per round the right frequency? Too rare = forgettable. Too common = generics feel pointless.
+
+11. **Persona engineer pricing:** All persona engineers are Senior (4 power) with a unique trait. Should they cost more to hire than generic Seniors? A premium hire cost (+$5-10) creates a meaningful "is this worth it?" decision. Or should the trait itself carry the downside (like Elom Tusk's engineer side adding extra debt)?
+
+12. **Product lock flexibility:** Each leader has a product lock (e.g., "Must start as B2B SaaS or Platform"). Should this be a hard constraint or a soft one (e.g., "may start as anything, but gets +1 production if B2B/Platform")? Hard locks reduce combinatorics but add identity. Soft locks preserve choice at the cost of one more thing to weigh during setup.
 
 ---
 
-*Plan created from issue feedback citing: Terraforming Mars (production tracks, corporation identity), 7 Wonders (incremental engine-building via card drafting, Leaders expansion), Gloomhaven/Arkham Horror (named characters with unique abilities leading your party), Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks/Arks (purchasable initiative), Captain Sonar (skill-gap warning).*
+*Plan created from issue feedback citing: Terraforming Mars (production tracks, corporation identity), 7 Wonders (incremental engine-building via card drafting, Leaders expansion), Gloomhaven/Arkham Horror (named characters with unique abilities leading your party), Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks (randomized trail tiles, purchasable initiative), Captain Sonar (skill-gap warning).*
