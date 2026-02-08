@@ -34,8 +34,8 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     name: 'VC-Heavy',
     description: 'Raised a big Series A. Lots of cash, but investors want growth.',
     startingMoney: 100,
-    equityRetained: 40,
-    bonusEffect: '+2 Marketing power. Can pivot once/game. 40% equity.',
+    equityRetained: 80,
+    bonusEffect: '+2 Marketing power. Can pivot once/game. 80% equity.',
     power: CORPORATION_POWERS.pivot,
   },
   {
@@ -44,7 +44,7 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     description: 'Self-funded. Limited cash, but you own everything.',
     startingMoney: 40,
     equityRetained: 100,
-    bonusEffect: 'Revenue scores 2x at end. -20% hiring costs. 100% equity.',
+    bonusEffect: 'Revenue scores 1.3x at end. -20% hiring costs. 100% equity.',
     power: CORPORATION_POWERS['lean-team'],
   },
   {
@@ -52,8 +52,8 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     name: 'Angel-Backed',
     description: 'Strategic angels provide moderate funding and connections.',
     startingMoney: 70,
-    equityRetained: 70,
-    bonusEffect: '+1 engineer capacity. See +2 extra engineers in draft. 70% equity.',
+    equityRetained: 90,
+    bonusEffect: '+1 engineer capacity. See +2 extra engineers in draft. 90% equity.',
     power: CORPORATION_POWERS['insider-info'],
   },
 ];

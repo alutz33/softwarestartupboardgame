@@ -195,7 +195,11 @@ function pickAction(player: SimPlayer, engineer: SimEngineer, round: number): {
   }
 
   // Late game: diversify
-  const options: ActionType[] = ['develop-features', 'marketing', 'monetization'];
+  const options: ActionType[] = ['develop-features', 'monetization'];
+  // immutable-ledger passive: can't use marketing
+  if (player.passiveId !== 'immutable-ledger') {
+    options.push('marketing');
+  }
   if (player.techDebt >= 4) options.push('optimize-code');
   if (round >= 3 && player.rating < 7) options.push('optimize-code');
 
@@ -251,7 +255,17 @@ function resolveAction(
     if (player.passiveId === 'efficient-ai') {
       aiDebt = Math.ceil(aiDebt * 0.5);
     }
+    // alignment-tax passive: AI generates no debt but -1 rating
+    if (player.passiveId === 'alignment-tax') {
+      aiDebt = 0;
+      player.rating = clamp(player.rating - 1, 1, 10);
+    }
     player.techDebt += aiDebt;
+  }
+
+  // hype-machine passive: +500 MAU ±200 variance on any action
+  if (player.passiveId === 'hype-machine') {
+    player.mau += 500 + randInt(-200, 200);
   }
 
   // Apply action effects
@@ -286,6 +300,10 @@ function resolveAction(
       if (player.money >= 15) {
         player.money -= 15;
         player.aiCapacity += 2;
+        // gpu-royalties passive: +1 AI capacity on research-ai
+        if (player.passiveId === 'gpu-royalties') {
+          player.aiCapacity += 1;
+        }
       }
       break;
     }
@@ -295,7 +313,12 @@ function resolveAction(
         let mauGain = 200 * totalPower;
         mauGain = Math.round(mauGain * player.rating / 5);
         player.mau += mauGain;
-        player.rating = clamp(player.rating + 1, 1, 10);
+        let ratingGain = 1;
+        // trust-safety passive: marketing gives +1 extra rating
+        if (player.passiveId === 'trust-safety') {
+          ratingGain += 1;
+        }
+        player.rating = clamp(player.rating + ratingGain, 1, 10);
       }
       break;
     }
@@ -367,9 +390,13 @@ function simulateRound(players: SimPlayer[], round: number): void {
   }
 
   // 4. Leader passive per-round effects
+  // Count how many players used marketing/develop-features this round for cross-player passives
+  // (simplified: estimate ~25% chance each player marketed, ~50% developed features)
+  const otherPlayerCount = players.length - 1;
+
   for (const p of players) {
-    // perfectionist: +1 rating/round
-    if (p.passiveId === 'perfectionist') {
+    // perfectionist: +1 rating on even rounds (Q2, Q4)
+    if (p.passiveId === 'perfectionist' && round % 2 === 0) {
       p.rating = clamp(p.rating + 1, 1, 10);
     }
     // ad-network: +$5/round
@@ -388,8 +415,27 @@ function simulateRound(players: SimPlayer[], round: number): void {
         PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION
       );
     }
-    // TODO: hype-machine, network-effects, immutable-ledger, gpu-royalties
-    // TODO: alignment-tax, trust-safety, marketplace-tax, dual-focus, crisis-resilience
+    // network-effects: +500 MAU when any opponent markets (estimated)
+    if (p.passiveId === 'network-effects') {
+      // ~25% chance each opponent marketed
+      const marketers = Math.floor(otherPlayerCount * 0.25);
+      if (marketers > 0) p.mau += 500 * marketers;
+    }
+    // marketplace-tax: +$3 per opponent developing features (estimated)
+    if (p.passiveId === 'marketplace-tax') {
+      // ~50% chance each opponent developed features
+      const developers = Math.floor(otherPlayerCount * 0.5);
+      p.money += 3 * developers;
+    }
+    // crisis-resilience: +200 MAU when opponents market (estimated)
+    if (p.passiveId === 'crisis-resilience') {
+      const marketers = Math.floor(otherPlayerCount * 0.25);
+      if (marketers > 0) p.mau += 200 * marketers;
+    }
+    // trust-safety: rating floor of 4
+    if (p.passiveId === 'trust-safety') {
+      p.rating = Math.max(4, p.rating);
+    }
   }
 
   // 5. Random event (simplified)
@@ -400,8 +446,11 @@ function simulateRound(players: SimPlayer[], round: number): void {
       p.mau = Math.max(0, p.mau - randInt(200, 800));
     } else if (roll < 0.25) {
       // Security breach: +tech debt, -rating
-      p.techDebt += randInt(1, 2);
-      p.rating = clamp(p.rating - 1, 1, 10);
+      // immutable-ledger passive: immune to data breach events
+      if (p.passiveId !== 'immutable-ledger') {
+        p.techDebt += randInt(1, 2);
+        p.rating = clamp(p.rating - 1, 1, 10);
+      }
     } else if (roll < 0.35) {
       // Positive event: gain MAU
       p.mau += randInt(100, 500);
@@ -431,11 +480,24 @@ function simulateRound(players: SimPlayer[], round: number): void {
 function calculateScore(player: SimPlayer): number {
   let score = 0;
   score += player.mau / 1000;
-  const revMultiplier = player.fundingType === 'bootstrapped' ? 2 : 1;
+  const revMultiplier = player.fundingType === 'bootstrapped' ? 1.3 : 1;
   score += (player.revenue / 500) * revMultiplier;
-  score += player.rating * 5;
-  if (player.techDebt >= 7) score -= 10;
-  return Math.round(score * 10) / 10;
+  score += player.rating * 3;
+
+  // Graduated debt penalty (Phase 5)
+  if (player.techDebt >= 12) {
+    score -= 20;
+  } else if (player.techDebt >= 8) {
+    score -= 10;
+  } else if (player.techDebt >= 4) {
+    score -= 5;
+  }
+
+  // Production track bonus (Phase 5)
+  score += player.mauProduction * 1;
+  score += player.revenueProduction * 2;
+
+  return Math.round(score);
 }
 
 // ============================================

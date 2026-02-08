@@ -8,24 +8,16 @@ function getDebtPenalty(techDebt: number): number {
   return 0;
 }
 
-function getEquityMultiplier(funding?: string): number {
-  if (funding === 'vc-heavy') return 0.4;
-  if (funding === 'angel-backed') return 0.7;
-  return 1;
-}
-
 function estimateScore(player: Player): number {
   let score = 0;
   score += player.metrics.mau / 1000;
-  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
+  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 1.3 : 1;
   score += (player.metrics.revenue / 500) * revenueMultiplier;
-  score += player.metrics.rating * 5;
+  score += player.metrics.rating * 3;
   score += getDebtPenalty(player.resources.techDebt);
   score += player.productionTracks.mauProduction * 1;
   score += player.productionTracks.revenueProduction * 2;
-  const equityMultiplier = getEquityMultiplier(player.strategy?.funding);
-  score = Math.round(score * equityMultiplier);
-  return score;
+  return Math.round(score);
 }
 
 interface WinConditionProps {
@@ -57,12 +49,11 @@ export function WinCondition({ players, currentRound, totalRounds = 4 }: WinCond
         <div className="text-gray-400 mb-1">Final Score =</div>
         <div className="space-y-1 text-gray-300">
           <div><span className="text-blue-400">MAU</span>/1000</div>
-          <div>+ <span className="text-green-400">Revenue</span>/500 <span className="text-gray-500">(x2 if Bootstrapped)</span></div>
-          <div>+ <span className="text-yellow-400">Rating</span> x 5</div>
+          <div>+ <span className="text-green-400">Revenue</span>/500 <span className="text-gray-500">(x1.3 if Bootstrapped)</span></div>
+          <div>+ <span className="text-yellow-400">Rating</span> x 3</div>
           <div>+ <span className="text-purple-400">Milestones</span></div>
           <div>+ <span className="text-cyan-400">MAU Prod</span> x 1 + <span className="text-cyan-400">Rev Prod</span> x 2</div>
           <div>- <span className="text-red-400">Debt Penalty</span> <span className="text-gray-500">(4+: -5, 8+: -10, 12+: -20)</span></div>
-          <div>x <span className="text-orange-400">Equity %</span> <span className="text-gray-500">(VC 40%, Angel 70%, Boot 100%)</span></div>
         </div>
       </div>
 
@@ -108,15 +99,13 @@ interface ScoreBreakdownProps {
 
 export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownProps) {
   const mauPoints = Math.round((player.metrics.mau / 1000) * 10) / 10;
-  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
+  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 1.3 : 1;
   const revenuePoints = Math.round((player.metrics.revenue / 500) * revenueMultiplier * 10) / 10;
-  const ratingPoints = player.metrics.rating * 5;
+  const ratingPoints = player.metrics.rating * 3;
   const debtPenalty = getDebtPenalty(player.resources.techDebt);
   const mauProdBonus = player.productionTracks.mauProduction * 1;
   const revProdBonus = player.productionTracks.revenueProduction * 2;
-  const equityMultiplier = getEquityMultiplier(player.strategy?.funding);
-  const subtotal = mauPoints + revenuePoints + ratingPoints + milestonePoints + debtPenalty + mauProdBonus + revProdBonus;
-  const total = Math.round(subtotal * equityMultiplier);
+  const total = Math.round(mauPoints + revenuePoints + ratingPoints + milestonePoints + debtPenalty + mauProdBonus + revProdBonus);
 
   return (
     <div className="bg-gray-800/50 rounded p-3 text-xs">
@@ -126,7 +115,7 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
 
         <span className="text-green-400">
           Revenue (${player.metrics.revenue})
-          {revenueMultiplier > 1 && <span className="text-gray-500"> x2</span>}:
+          {revenueMultiplier > 1 && <span className="text-gray-500"> x1.3</span>}:
         </span>
         <span className="text-right">+{revenuePoints}</span>
 
@@ -150,13 +139,6 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
           <>
             <span className="text-red-400">Debt Penalty ({player.resources.techDebt}):</span>
             <span className="text-right text-red-400">{debtPenalty}</span>
-          </>
-        )}
-
-        {equityMultiplier < 1 && (
-          <>
-            <span className="text-orange-400">Equity ({Math.round(equityMultiplier * 100)}%):</span>
-            <span className="text-right text-orange-400">x{equityMultiplier}</span>
           </>
         )}
 

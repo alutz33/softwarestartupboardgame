@@ -2291,8 +2291,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // LEADER PASSIVE EFFECTS (applied per round)
         // ============================================
 
-        // perfectionist (Steeve Careers): +1 rating every round
-        if (player.leader?.leaderSide.passive.id === 'perfectionist') {
+        // perfectionist (Steeve Careers): +1 rating on even rounds (Q2, Q4)
+        if (player.leader?.leaderSide.passive.id === 'perfectionist' && state.currentRound % 2 === 0) {
           newMetrics.rating = Math.min(10, newMetrics.rating + 1);
         }
 
@@ -2630,12 +2630,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Revenue score (1 point per 500 revenue)
       let revenueMultiplier = 1;
       if (player.strategy?.funding === 'bootstrapped') {
-        revenueMultiplier = 2; // Bootstrapped gets 2x revenue scoring
+        revenueMultiplier = 1.3; // Bootstrapped gets 1.3x revenue scoring
       }
       score += (player.metrics.revenue / 500) * revenueMultiplier;
 
-      // Rating score (5 points per rating point on 1-10 scale, max 50)
-      score += player.metrics.rating * 5;
+      // Rating score (3 points per rating point on 1-10 scale, max 30)
+      score += player.metrics.rating * 3;
 
       // MILESTONE BONUSES - Add points for claimed milestones
       for (const milestone of state.milestones) {
@@ -2670,15 +2670,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       score += player.productionTracks.mauProduction * 1;
       score += player.productionTracks.revenueProduction * 2;
 
-      // Equity multiplier based on funding type
-      // vc-heavy: 40%, angel-backed: 70%, bootstrapped: 100%
-      let equityMultiplier = 1;
-      if (player.strategy?.funding === 'vc-heavy') {
-        equityMultiplier = 0.4;
-      } else if (player.strategy?.funding === 'angel-backed') {
-        equityMultiplier = 0.7;
-      }
-      score = Math.round(score * equityMultiplier);
+      // Score is now directly calculated without equity multiplier.
+      // Funding balance comes from starting resources and unique powers:
+      // VC-Heavy: $100 start + pivot power
+      // Angel: $70 start + insider info
+      // Bootstrapped: $40 start + lean team + 1.5x revenue scoring
+      score = Math.round(score);
 
       scores.set(player.id, score);
     }

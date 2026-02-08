@@ -58,7 +58,7 @@ export const PERSONA_CARDS: PersonaCard[] = [
       passive: {
         id: 'perfectionist',
         name: 'Perfectionist',
-        description: '+1 rating every round',
+        description: '+1 rating on even rounds (Q2, Q4)',
       },
     },
     engineerSide: {
