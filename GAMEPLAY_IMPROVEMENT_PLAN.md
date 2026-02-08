@@ -232,10 +232,21 @@ Instead of complex multipliers, each corporation/funding type simply starts with
 - Your Major Leader defines your corporation's personality, unique power, and starting bonuses
 - This replaces the tech mogul persona draft AND simplifies corporation setup
 
-**Each round (engineer recruitment):**
+**Each round (engineer recruitment — building your motley crew):**
 - Draw from the engineering card deck — these come up on the **Minor Engineer side**
-- Minor engineers are the standard hires: Intern, Junior, Senior with specialties
+- Each minor engineer is a **named character** with personality, a small unique bonus, and a specialty
+- Recruiting engineers feels like 7 Wonders card drafting: each hire adds a small, specific piece to your engine
+- Over the game, your corporation accumulates a motley crew of distinctive personalities — no two teams look the same
 - The leader side of these cards is hidden/irrelevant once they're in the minor engineer pool
+
+**The "Motley Crew" Engine-Building Feel (inspired by 7 Wonders):**
+
+In 7 Wonders, each card you draft gives a small, specific bonus (+1 shield, +1 science symbol, +2 coins). Individually they're minor, but they compound into a unique engine. Our minor engineers work the same way:
+
+- Each engineer has a **name and personality** — they're characters, not stat blocks
+- Each has a **small unique perk** on top of their base power and specialty — these perks stack and combo
+- Drafting engineers each round becomes a meaningful engine-building decision: "Do I grab the DevOps engineer with the server bonus, or the AI specialist who reduces tech debt?"
+- By late game, your team of 5-6 named characters feels like YOUR startup's story
 
 **Major Leader Card (front):**
 ```
@@ -265,27 +276,62 @@ Instead of complex multipliers, each corporation/funding type simply starts with
 
 **Minor Engineer Card (back):**
 ```
-┌─────────────────────────────┐
-│  ENGINEER                   │
-│                             │
-│  Level: Junior              │
-│  Power: 2                   │
-│  Salary: $15/round          │
-│                             │
-│  Specialty: Frontend        │
-│  +1 power on Dev Features   │
-│                             │
-│  Trait: Night Owl           │
-│  +1 power on last action    │
-└─────────────────────────────┘
+┌─────────────────────────────────────┐
+│  ENGINEER                           │
+│                                     │
+│  "Priya Stacktrace"                 │
+│  The Midnight Debugger              │
+│                                     │
+│  Level: Junior  |  Power: 2         │
+│  Salary: $15/round                  │
+│                                     │
+│  Specialty: Frontend                │
+│  +1 power on Develop Features       │
+│                                     │
+│  Perk: NIGHT OWL                    │
+│  +1 power when assigned to the      │
+│  last action slot in a round        │
+│                                     │
+│  Flavor: "The best code happens     │
+│  after everyone else goes home."    │
+└─────────────────────────────────────┘
 ```
+
+**Example Minor Engineer Roster (showing engine-building variety):**
+
+| Name | Level | Specialty | Perk | Engine Contribution |
+|---|---|---|---|---|
+| **Priya Stacktrace** | Junior | Frontend | Night Owl: +1 power on last action | Rewards careful action ordering |
+| **Chad Brogrammer** | Junior | Backend | Crunch Mode: +2 power but +1 tech debt | High risk/reward burst |
+| **Ava Lightfoot** | Senior | DevOps | Auto-Scale: +1 server capacity each round (passive) | Infrastructure engine |
+| **Raj Pipeline** | Junior | DevOps | CI/CD: -1 tech debt when you Develop Features | Debt control engine |
+| **Kim Pixel** | Intern | Frontend | Viral Design: +1 MAU Production when Marketing | Marketing synergy |
+| **Otto Compiler** | Senior | AI | Deep Learning: AI augmentation costs 0 tech debt | Clean AI engine |
+| **Sam Segfault** | Junior | Fullstack | Jack of All Trades: +1 power on ANY action | Flexible utility |
+| **Morgan Cache** | Senior | Backend | Memoize: Optimize Code gives +2 rating instead of +1 | Rating engine |
+| **Zoe Zeroba** | Intern | AI | Eager Learner: gains +1 power each round (starts at 1) | Scaling investment |
+| **Blake Burndown** | Junior | Fullstack | Sprint Lead: all OTHER engineers on same action get +1 power | Team synergy |
+| **Luna Localhost** | Senior | Frontend | Perfectionist: +2 rating but -1 MAU Production | Quality vs. growth tradeoff |
+| **Dev Nullson** | Intern | Backend | Coffee Machine: costs $0 salary (works for equity) | Economy engine |
+| **Kai Kubernetes** | Junior | DevOps | Orchestrator: server upgrades give +2 capacity instead of +1 | Infra scaling |
+| **Ash Overflow** | Junior | Backend | Copy-Paste: duplicate another engineer's perk this round | Combo enabler |
+| **Nyx Nightly** | Senior | AI | Skynet Protocol: AI actions give +1 to ALL production tracks | Late-game accelerator |
+| **River Refactor** | Junior | Fullstack | Clean Sweep: -2 tech debt when you Pay Down Debt (instead of -1) | Debt clearing engine |
+
+**How perks create engine-building:**
+- **Stacking**: Hire Blake Burndown (team synergy) + multiple engineers on the same action = multiplicative power
+- **Combos**: Raj Pipeline (debt control) + Lora Page leader (AI-heavy, +1 debt/round) = neutralize your leader's weakness
+- **Specialization**: Go all-in on DevOps engineers → server infrastructure engine → crash-proof + passive revenue
+- **Counterplay**: See opponents drafting AI engineers → grab Otto Compiler before they do
 
 **Why this works:**
 - **Reduces component count**: One deck of cards serves two purposes
-- **Thematic**: Your leader was once an engineer who founded the company
+- **Thematic**: Your leader was once an engineer who founded the company — now they lead a crew of misfits
 - **Simplifies setup**: Pick 1 of 2 leaders instead of navigating a 3x3x3 grid
-- **Adds personality from turn 1**: Every game has a named character leading your company
-- **Scales the deck naturally**: 8 leader designs = 8 cards that double as 8 minor engineers when not chosen as leaders
+- **Adds personality throughout**: Not just turn 1 — every round you meet new named characters
+- **Engine-building depth** (7 Wonders model): Each hire adds a small perk that compounds. By round 4, your team has a distinct identity and synergy
+- **Replayability**: With 16+ minor engineers in the deck, each game surfaces a different pool. You build around what's available, not a predetermined strategy
+- **Scales the deck naturally**: 8 leader designs + 16 minor engineer designs = 24 cards total (or more with expansions)
 - **Physical production friendly**: Dual-sided cards are standard in board game manufacturing
 
 **Leader roster (replaces both personas AND corporation tech/product modifiers):**
@@ -302,12 +348,14 @@ Instead of complex multipliers, each corporation/funding type simply starts with
 | **Satoshi Nakamaybe** | Tech debt capped at 5, +1 all production | **Decentralize**: Once/game, all opponents +2 tech debt | Cannot use Marketing action |
 
 **Impact on codebase:**
-- `src/data/engineers.ts`: Add `leaderSide` data to card definitions; restructure as dual-sided
-- `src/data/personas.ts` (was planned): **Not needed** — leader data lives on the card
+- `src/data/engineers.ts`: Complete rewrite — each card is a named character with `leaderSide` and `engineerSide` data; replace random generation with curated roster of 16+ named engineers
+- `src/data/personas.ts` (was planned): **Not needed** — leader data lives on the card, engineer personas live on the flip side
 - `src/data/corporations.ts`: Drastically simplified (see 1.5)
-- `src/types/index.ts`: Add `LeaderCard` type, modify `EngineerCard` to include `leaderSide`
+- `src/types/index.ts`: Add `LeaderCard` type, add `EngineerPersona` with `name`, `title`, `perk`, `flavorText`; modify `EngineerCard` to be dual-sided
 - New component: `src/components/game/LeaderDraft.tsx`
+- New component: `src/components/game/EngineerCard.tsx` — displays named character with art, perk description, flavor text
 - Modify: `src/components/game/CorporationSelection.tsx` → simplified to leader pick + funding choice
+- Modify: `src/state/gameStore.ts` — perk resolution during `resolveActions()`, perk-specific passive effects at round start/end
 
 ---
 
@@ -621,6 +669,10 @@ Phase 5 (Polish):
 
 8. **Physical vs. digital card design:** Dual-sided cards work naturally for physical production. In the digital version, how do we represent the "flip" — show both sides in a modal? Tab interface? The leader side needs prominent display during the game since it defines your identity.
 
+9. **Engineer deck size vs. game length:** With 16+ named engineers and 4 rounds of drafting ~2-3 per player per round, a 4-player game needs ~24-32 engineer draws. The deck needs enough cards that not all engineers appear every game (replayability) but not so many that favorites rarely show up. Sweet spot is probably 20-24 minor engineer designs for base game.
+
+10. **Perk power level:** Some perks are passive (Ava Lightfoot's +1 server/round compounds over 4 rounds) while others are situational (Chad Brogrammer's Crunch Mode). Need to ensure passive perks on cheaper interns/juniors don't outclass expensive senior one-shot perks. The 7 Wonders approach: weaker cards are more common, powerful cards are rarer in the deck.
+
 ---
 
-*Plan created from issue feedback citing: Terraforming Mars (production tracks, corporation identity), Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks/Arks (purchasable initiative), Captain Sonar (skill-gap warning).*
+*Plan created from issue feedback citing: Terraforming Mars (production tracks, corporation identity), 7 Wonders (incremental engine-building via card drafting, Leaders expansion), Gloomhaven/Arkham Horror (named characters with unique abilities leading your party), Scythe (visual progression), Ark Nova (tag bonuses), Quacks of Quedlinburg (push-your-luck), Spirit Island (telegraphed threats), Tokaido (catch-up turn order), Arkham Horror (event layering), Parks/Arks (purchasable initiative), Captain Sonar (skill-gap warning).*
