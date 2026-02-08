@@ -8,6 +8,7 @@ import {
   EngineerDraft,
   PlanningPhase,
   RevealPhase,
+  SprintPhase,
   ResolutionPhase,
   EventPhase,
   RoundEnd,
@@ -39,6 +40,8 @@ function App() {
         return <RevealPhase />;
       case 'puzzle':
         return <PuzzleGame />;
+      case 'sprint':
+        return <SprintPhase />;
       case 'resolution':
         return <ResolutionPhase />;
       case 'event':

@@ -6,6 +6,7 @@ export { StartupCardDraft } from './StartupCardDraft';
 export { EngineerDraft } from './EngineerDraft';
 export { PlanningPhase } from './PlanningPhase';
 export { RevealPhase } from './RevealPhase';
+export { SprintPhase } from './SprintPhase';
 export { ResolutionPhase } from './ResolutionPhase';
 export { EventPhase } from './EventPhase';
 export { RoundEnd } from './RoundEnd';

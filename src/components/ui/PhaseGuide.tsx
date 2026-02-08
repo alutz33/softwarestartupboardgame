@@ -134,6 +134,23 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
       'Fewer blocks = higher score',
     ],
   },
+  'sprint': {
+    title: 'Sprint Mini-Game',
+    emoji: 'Sprint Mini-Game',
+    description: 'Push your luck! Draw tokens from the bag for clean code, but watch out for bugs.',
+    steps: [
+      '1. Draw tokens from the shared bag',
+      '2. Clean code tokens add to your score',
+      '3. Bugs accumulate - 3 bugs and you crash!',
+      '4. Stop anytime to bank your clean code points',
+    ],
+    tips: [
+      'More engineers = more draws allowed',
+      'Backend specialists get one free bug revert',
+      'Critical bugs count as 2 regular bugs',
+      'Crashing loses ALL your clean code progress',
+    ],
+  },
   'resolution': {
     title: 'Executing Actions',
     emoji: 'Executing Actions',

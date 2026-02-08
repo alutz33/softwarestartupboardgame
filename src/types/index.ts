@@ -348,6 +348,93 @@ export interface PuzzleBonus {
 }
 
 // ============================================
+// SPRINT MINI-GAME (Push-Your-Luck)
+// ============================================
+// Replaces coding puzzle with Quacks of Quedlinburg-style token drawing
+
+export type SprintTokenType = 'clean-code-1' | 'clean-code-2' | 'bug' | 'critical-bug';
+
+export interface SprintToken {
+  id: string;
+  type: SprintTokenType;
+  name: string;
+  value: number;       // Clean code points (positive) or 0 for bugs
+  isBug: boolean;      // true for bug and critical-bug
+  isCritical: boolean; // true only for critical-bug (counts as 2 bugs)
+}
+
+export interface SprintPlayerState {
+  playerId: string;
+  drawnTokens: SprintToken[];
+  cleanCodeTotal: number;   // Sum of clean code values
+  bugCount: number;          // Number of bugs drawn (critical = 2)
+  hasCrashed: boolean;       // true if bugCount >= 3
+  hasStopped: boolean;       // true if player chose to stop
+  maxDraws: number;          // Based on engineer count: 1->5, 2->7, 3->9
+  hasBackendRevert: boolean; // true if player has backend specialty (1 free bug ignore)
+  usedBackendRevert: boolean; // true if free revert was used
+  isParticipant: boolean;    // true if player assigned engineers to Optimize Code
+}
+
+export interface SprintState {
+  tokenBag: SprintToken[];       // Remaining tokens in the bag
+  playerStates: SprintPlayerState[];
+  currentPlayerIndex: number;    // Which player is currently drawing
+  isComplete: boolean;           // All players done
+  drawOrder: string[];           // Player IDs in drawing order
+}
+
+// ============================================
+// QUARTERLY THEMES (Market Conditions)
+// ============================================
+
+export type QuarterlyThemeId =
+  | 'startup-boom'
+  | 'market-expansion'
+  | 'the-reckoning'
+  | 'ipo-window'
+  | 'ai-gold-rush'
+  | 'talent-war'
+  | 'regulatory-crackdown'
+  | 'bubble-market';
+
+export interface ThemeModifier {
+  actionCostMultiplier?: Partial<Record<ActionType, number>>;  // Multiply action costs
+  actionOutputMultiplier?: Partial<Record<ActionType, number>>; // Multiply action output
+  globalEffects?: {
+    salaryChange?: number;        // +/- to all salaries
+    incomeBonus?: number;         // Flat income bonus
+    extraDraftEngineers?: number; // Extra engineers in pool
+    debtPenaltyMultiplier?: number; // Multiply debt penalties
+  };
+  restrictedActions?: ActionType[];  // Actions unavailable this quarter
+  bonusActions?: ActionType[];       // Actions that give bonus output
+}
+
+export interface QuarterlyTheme {
+  id: QuarterlyThemeId;
+  name: string;
+  description: string;
+  flavor: string;         // Thematic text
+  modifiers: ThemeModifier;
+}
+
+// ============================================
+// SEQUENTIAL ACTION DRAFT (Phase 3)
+// ============================================
+
+export type PlanningMode = 'sequential' | 'simultaneous';
+
+export interface SequentialDraftState {
+  pickOrder: string[];          // Snake draft order of player IDs
+  currentPickerIndex: number;   // Who picks next
+  picksPerRound: number;        // Total picks in this draft round
+  picksCompleted: number;       // How many picks done
+  isComplete: boolean;          // All picks done
+  timeoutSeconds: number;       // Per-pick timer (0 = no timer)
+}
+
+// ============================================
 // PLAYER STATE
 // ============================================
 
@@ -394,6 +481,7 @@ export type GamePhase =
   | 'planning'
   | 'reveal'
   | 'puzzle'
+  | 'sprint'                    // Phase 3: Push-your-luck sprint mini-game
   | 'resolution'
   | 'event'
   | 'round-end'
@@ -421,6 +509,9 @@ export interface RoundState {
   upcomingEvent?: GameEvent; // EVENT FORECASTING: Show next round's event during planning
   currentPuzzle?: Puzzle;
   puzzleResults?: PuzzleResult;
+  sprintState?: SprintState;
+  sequentialDraft?: SequentialDraftState;
+  activeTheme?: QuarterlyTheme;
   occupiedActions: Map<ActionType, string[]>; // action -> array of playerIds who have claimed it
   draftOrder: string[]; // player IDs in draft order (lowest MAU first for catch-up)
   personaAuction?: PersonaAuctionState; // Active persona auction
@@ -463,6 +554,8 @@ export interface GameState {
   eventDeck: GameEvent[];
   usedEvents: GameEvent[];
   milestones: Milestone[]; // Track claimed milestones
+  quarterlyThemes: QuarterlyTheme[];
+  planningMode: PlanningMode;
   // Startup card draft (legacy)
   startupDeck: StartupCard[];
   dealtStartupCards: Map<string, StartupCard[]>; // playerId -> dealt cards
@@ -492,7 +585,10 @@ export type GameAction =
   | { type: 'RESOLVE_ACTIONS' }
   | { type: 'APPLY_EVENT' }
   | { type: 'END_ROUND' }
-  | { type: 'CALCULATE_WINNER' };
+  | { type: 'CALCULATE_WINNER' }
+  | { type: 'DRAW_SPRINT_TOKEN'; playerId: string }
+  | { type: 'STOP_SPRINT'; playerId: string }
+  | { type: 'CLAIM_ACTION_SLOT'; playerId: string; engineerId: string; action: ActionType; useAi: boolean };
 
 // ============================================
 // UI STATE

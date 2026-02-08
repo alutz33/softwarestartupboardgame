@@ -15,6 +15,7 @@ import type {
   PersonaCard,
   PersonaAuctionState,
   HiredEngineer,
+  SprintPlayerState,
 } from '../types';
 import {
   TOTAL_QUARTERS,
@@ -44,6 +45,8 @@ import {
   personaToEngineer,
   drawPersonasForRound,
 } from '../data/personaCards';
+import { shuffleThemes, getThemeForRound } from '../data/quarters';
+import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -93,6 +96,22 @@ function checkMilestones(
   });
 }
 
+// Helper function to find the next active sprint player
+function findNextSprintPlayer(
+  playerStates: SprintPlayerState[],
+  currentIndex: number
+): { index: number; allDone: boolean } {
+  const total = playerStates.length;
+  for (let i = 1; i <= total; i++) {
+    const nextIndex = (currentIndex + i) % total;
+    const ps = playerStates[nextIndex];
+    if (!ps.hasStopped && !ps.hasCrashed && ps.drawnTokens.length < ps.maxDraws) {
+      return { index: nextIndex, allDone: false };
+    }
+  }
+  return { index: currentIndex, allDone: true };
+}
+
 interface GameStore extends GameState {
   // Setup actions
   initGame: (playerCount: number) => void;
@@ -135,6 +154,12 @@ interface GameStore extends GameState {
   submitPuzzleSolution: (playerId: string, blocks: CodeBlock[], solveTime: number) => void;
   endPuzzle: () => void;
 
+  // Sprint mini-game actions
+  startSprint: () => void;
+  drawSprintToken: (playerId: string) => void;
+  stopSprint: (playerId: string) => void;
+  endSprint: () => void;
+
   // Resolution actions
   resolveActions: () => void;
   applyEvent: () => void;
@@ -145,6 +170,10 @@ interface GameStore extends GameState {
 
   // Corporation powers
   usePivotPower: (playerId: string, newProductType: 'b2b' | 'consumer' | 'platform') => boolean;
+
+  // Sequential action draft
+  claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => void;
+  advanceSequentialDraft: () => void;
 
   // Utility
   getCurrentPlayer: () => Player | undefined;
@@ -209,6 +238,8 @@ function createInitialState(): GameState {
     eventDeck: createEventDeck(),
     usedEvents: [],
     milestones: createInitialMilestones(),
+    quarterlyThemes: [],
+    planningMode: 'simultaneous',
     // Startup card draft (legacy)
     startupDeck: [],
     dealtStartupCards: new Map(),
@@ -231,6 +262,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { dealtCards: dealtLeaderCards, remainingDeck: remainingPersonaDeck } =
       dealLeaderCards(personaDeck, playerCount, 3);
 
+    // Shuffle quarterly themes (deal 4 for 4 rounds)
+    const quarterlyThemes = shuffleThemes();
+
     // Still create startup deck for legacy support
     const startupDeck = createStartupDeck();
     const { dealtCards: dealtStartupCards, remainingDeck: remainingStartupDeck } =
@@ -244,6 +278,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       dealtStartupCards,
       personaDeck: remainingPersonaDeck,
       dealtLeaderCards,
+      quarterlyThemes,
     });
   },
 
@@ -406,6 +441,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             occupiedActions: new Map(),
             draftOrder,
             upcomingEvent,
+            activeTheme: getThemeForRound(state.quarterlyThemes, 1),
           },
         };
       }
@@ -692,6 +728,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             occupiedActions: new Map(),
             draftOrder,
             upcomingEvent,
+            activeTheme: getThemeForRound(state.quarterlyThemes, 1),
           },
         };
       }
@@ -758,6 +795,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             occupiedActions: new Map(),
             draftOrder,
             upcomingEvent,
+            activeTheme: getThemeForRound(state.quarterlyThemes, 1),
           },
         };
       }
@@ -1106,17 +1144,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   revealPlans: () => {
-    // Check if any player has optimize action - if so, go to puzzle
+    // Check if any player has optimize action - if so, go to sprint mini-game
     const state = get();
     const hasOptimize = state.players.some((p) =>
       p.plannedActions.some((a) => a.actionType === 'optimize-code')
     );
 
     set({
-      phase: hasOptimize ? 'puzzle' : 'resolution',
+      phase: hasOptimize ? 'sprint' : 'resolution',
       roundState: {
         ...state.roundState,
-        phase: hasOptimize ? 'puzzle' : 'resolution',
+        phase: hasOptimize ? 'sprint' : 'resolution',
       },
     });
   },
@@ -1216,6 +1254,210 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   },
 
+  // ============================================
+  // SPRINT MINI-GAME (Push-Your-Luck)
+  // ============================================
+
+  startSprint: () => {
+    const state = get();
+    const tokenBag = createSprintBag();
+    const drawOrder = state.players.map(p => p.id);
+
+    const playerStates: SprintPlayerState[] = state.players.map(player => {
+      const optimizeCount = player.plannedActions.filter(
+        a => a.actionType === 'optimize-code'
+      ).length;
+      const isParticipant = optimizeCount > 0;
+
+      // Check if player has any backend specialty engineers
+      const hasBackendRevert = player.engineers.some(
+        e => e.specialty === 'backend'
+      );
+
+      return {
+        playerId: player.id,
+        drawnTokens: [],
+        cleanCodeTotal: 0,
+        bugCount: 0,
+        hasCrashed: false,
+        hasStopped: false,
+        maxDraws: isParticipant ? getMaxDraws(optimizeCount) : 1,
+        hasBackendRevert,
+        usedBackendRevert: false,
+        isParticipant,
+      };
+    });
+
+    set({
+      phase: 'sprint' as GamePhase,
+      roundState: {
+        ...state.roundState,
+        phase: 'sprint' as GamePhase,
+        sprintState: {
+          tokenBag,
+          playerStates,
+          currentPlayerIndex: 0,
+          isComplete: false,
+          drawOrder,
+        },
+      },
+    });
+  },
+
+  drawSprintToken: (playerId: string) => {
+    set((state) => {
+      const sprintState = state.roundState.sprintState;
+      if (!sprintState || sprintState.isComplete) return state;
+
+      const playerIndex = sprintState.playerStates.findIndex(
+        ps => ps.playerId === playerId
+      );
+      if (playerIndex === -1) return state;
+
+      const playerState = sprintState.playerStates[playerIndex];
+
+      // Can't draw if done
+      if (playerState.hasStopped || playerState.hasCrashed ||
+          playerState.drawnTokens.length >= playerState.maxDraws) {
+        return state;
+      }
+
+      // Can't draw if bag is empty
+      if (sprintState.tokenBag.length === 0) return state;
+
+      // Pop a token from the bag
+      const newBag = [...sprintState.tokenBag];
+      const token = newBag.pop()!;
+
+      // Update player state
+      const newPlayerState = { ...playerState };
+      newPlayerState.drawnTokens = [...playerState.drawnTokens, token];
+
+      if (token.isBug) {
+        // Check for backend revert
+        if (newPlayerState.hasBackendRevert && !newPlayerState.usedBackendRevert) {
+          newPlayerState.usedBackendRevert = true;
+          // Don't count the bug - reverted
+        } else {
+          newPlayerState.bugCount += token.isCritical ? 2 : 1;
+        }
+
+        if (newPlayerState.bugCount >= 3) {
+          newPlayerState.hasCrashed = true;
+        }
+      } else {
+        newPlayerState.cleanCodeTotal += token.value;
+      }
+
+      // Update player states array
+      const newPlayerStates = sprintState.playerStates.map((ps, i) =>
+        i === playerIndex ? newPlayerState : ps
+      );
+
+      // Check if current player is done and advance
+      const isDone = newPlayerState.hasCrashed ||
+                     newPlayerState.hasStopped ||
+                     newPlayerState.drawnTokens.length >= newPlayerState.maxDraws;
+
+      let newCurrentIndex = sprintState.currentPlayerIndex;
+      let isComplete: boolean = sprintState.isComplete;
+
+      if (isDone) {
+        const result = findNextSprintPlayer(newPlayerStates, sprintState.currentPlayerIndex);
+        newCurrentIndex = result.index;
+        isComplete = result.allDone;
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          sprintState: {
+            ...sprintState,
+            tokenBag: newBag,
+            playerStates: newPlayerStates,
+            currentPlayerIndex: newCurrentIndex,
+            isComplete,
+          },
+        },
+      };
+    });
+  },
+
+  stopSprint: (playerId: string) => {
+    set((state) => {
+      const sprintState = state.roundState.sprintState;
+      if (!sprintState || sprintState.isComplete) return state;
+
+      const playerIndex = sprintState.playerStates.findIndex(
+        ps => ps.playerId === playerId
+      );
+      if (playerIndex === -1) return state;
+
+      const newPlayerStates = sprintState.playerStates.map((ps, i) =>
+        i === playerIndex ? { ...ps, hasStopped: true } : ps
+      );
+
+      // Advance to next non-done player
+      const result = findNextSprintPlayer(newPlayerStates, sprintState.currentPlayerIndex);
+
+      return {
+        roundState: {
+          ...state.roundState,
+          sprintState: {
+            ...sprintState,
+            playerStates: newPlayerStates,
+            currentPlayerIndex: result.index,
+            isComplete: result.allDone,
+          },
+        },
+      };
+    });
+  },
+
+  endSprint: () => {
+    set((state) => {
+      const sprintState = state.roundState.sprintState;
+      if (!sprintState) return state;
+
+      // Find best non-crashed total
+      const nonCrashedTotals = sprintState.playerStates
+        .filter(ps => !ps.hasCrashed)
+        .map(ps => ps.cleanCodeTotal);
+      const bestTotal = nonCrashedTotals.length > 0 ? Math.max(...nonCrashedTotals) : 0;
+
+      // Apply effects to each player
+      const updatedPlayers = state.players.map(player => {
+        const ps = sprintState.playerStates.find(s => s.playerId === player.id);
+        if (!ps) return player;
+
+        const effectiveTotal = ps.hasCrashed ? 0 : ps.cleanCodeTotal;
+        const debtReduction = getSprintDebtReduction(effectiveTotal);
+        const ratingBonus = getSprintRatingBonus(effectiveTotal, bestTotal);
+
+        return {
+          ...player,
+          resources: {
+            ...player.resources,
+            techDebt: Math.max(0, player.resources.techDebt - debtReduction),
+          },
+          metrics: {
+            ...player.metrics,
+            rating: Math.min(10, player.metrics.rating + ratingBonus),
+          },
+        };
+      });
+
+      return {
+        players: updatedPlayers,
+        phase: 'resolution' as GamePhase,
+        roundState: {
+          ...state.roundState,
+          phase: 'resolution' as GamePhase,
+        },
+      };
+    });
+  },
+
   resolveActions: () => {
     set((state) => {
       let updatedPlayers = [...state.players];
@@ -1313,6 +1555,56 @@ export const useGameStore = create<GameStore>((set, get) => ({
             }
           }
 
+          // PERSONA TRAIT: Volatile (Elom eng) - +2 power on Research AI, AI +1 extra debt
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile') {
+            if (action.actionType === 'research-ai') {
+              totalPower += 2;
+            }
+            if (useAi) {
+              newResources.techDebt += 1; // Extra debt from volatile AI usage
+            }
+          }
+
+          // PERSONA TRAIT: Researcher (Lora eng) - no specialty bonus on non-AI, double on AI
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Researcher') {
+            if (action.actionType === 'research-ai') {
+              totalPower += specialtyBonus; // Double the specialty bonus (already added once above)
+            } else {
+              totalPower -= specialtyBonus; // Remove the specialty bonus for non-AI actions
+            }
+          }
+
+          // PERSONA TRAIT: Parallel Processor (Jensen eng) - Research AI gives +1 server capacity
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Parallel Processor') {
+            if (action.actionType === 'research-ai') {
+              newResources.serverCapacity += 1;
+            }
+          }
+
+          // PERSONA TRAIT: Alignment Researcher (Sam eng) - +2 power Research AI, -1 if AI Capacity > 6
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Alignment Researcher') {
+            if (action.actionType === 'research-ai') {
+              totalPower += 2;
+            }
+            if (newResources.aiCapacity > 6) {
+              totalPower = Math.max(0, totalPower - 1);
+            }
+          }
+
+          // PERSONA TRAIT: Protocol Purist (Jack eng) - +1 power on Pay Down Debt
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Protocol Purist') {
+            if (action.actionType === 'pay-down-debt') {
+              totalPower += 1;
+            }
+          }
+
+          // PERSONA TRAIT: Resilience Architect (Brian eng) - +1 power on Upgrade Servers
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Resilience Architect') {
+            if (action.actionType === 'upgrade-servers') {
+              totalPower += 1;
+            }
+          }
+
           // TECH DEBT POWER PENALTY (integer: -1 per 4 debt)
           const currentDebtLevel = getTechDebtLevel(newResources.techDebt);
           if (action.actionType !== 'pay-down-debt') {
@@ -1330,12 +1622,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
             if (player.leader?.leaderSide.passive.id === 'efficient-ai') {
               aiDebt = Math.ceil(aiDebt * 0.5);
             }
+            // LEADER PASSIVE: alignment-tax (Sam Chatman) - AI generates NO debt, but -1 rating
+            if (player.leader?.leaderSide.passive.id === 'alignment-tax') {
+              aiDebt = 0;
+              newMetrics.rating = Math.max(1, newMetrics.rating - 1);
+            }
+            // PERSONA TRAIT: Decentralist (Satoshi eng) - AI debt halved for this engineer
+            if (engineer.isPersona && engineer.personaTrait?.name === 'Decentralist') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            // PERSONA TRAIT: Admiral's Discipline (Grace eng) - assigned action generates 0 tech debt
+            if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
+              aiDebt = 0;
+            }
             newResources.techDebt += aiDebt;
           }
 
           // ============================================
           // APPLY ACTION EFFECTS (using integer power)
           // ============================================
+
+          // PERSONA TRAIT: Community Manager (Whitney eng) - track rating before action
+          const ratingBeforeAction = newMetrics.rating;
+          const hasCommunityManager = engineer.isPersona && engineer.personaTrait?.name === 'Community Manager';
+
+          // PERSONA TRAIT: Admiral's Discipline (Grace eng) - track debt before action
+          const debtBeforeAction = newResources.techDebt;
+          const hasAdmiralsDiscipline = engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline";
 
           switch (action.actionType) {
             case 'develop-features': {
@@ -1356,6 +1669,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
                   newProduction.revenueProduction + 1
                 );
+              }
+              // PERSONA TRAIT: Perfectionist (Steeve eng) - Develop Features +1 rating, -200 MAU
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Perfectionist') {
+                newMetrics.rating = Math.min(10, newMetrics.rating + 1);
+                newMetrics.mau = Math.max(0, newMetrics.mau - 200);
               }
               break;
             }
@@ -1399,7 +1717,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               newResources.serverCapacity += 5;
               break;
 
-            case 'research-ai':
+            case 'research-ai': {
               // Pay cost once per action type
               if (!costsPaid.has('research-ai')) {
                 if (newResources.money >= 15) {
@@ -1411,7 +1729,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
               }
               // +2 AI capacity (flat)
               newResources.aiCapacity += 2;
+              // LEADER PASSIVE: gpu-royalties (Jensen Wattson) - Research AI gives +1 AI capacity
+              if (player.leader?.leaderSide.passive.id === 'gpu-royalties') {
+                newResources.aiCapacity += 1;
+              }
               break;
+            }
 
             case 'marketing': {
               // Pay cost once per action type
@@ -1438,6 +1761,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
                 10,
                 newMetrics.rating + (actionSpace.effect.ratingChange || 0)
               );
+              // LEADER PASSIVE: trust-safety (Whitney Buzz Herd) - Marketing gives +1 extra rating
+              if (player.leader?.leaderSide.passive.id === 'trust-safety') {
+                newMetrics.rating = Math.min(10, newMetrics.rating + 1);
+              }
               // PERSONA TRAIT: Growth Hacker or Content Algorithm - Marketing gives +1 MAU Production
               if (engineer.isPersona &&
                   (engineer.personaTrait?.name === 'Growth Hacker' ||
@@ -1479,6 +1806,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
               }
               // LEADER PASSIVE: saas-compounding (Marc Cloudoff) - Monetization gives +1 Rev Production
               if (player.leader?.leaderSide.passive.id === 'saas-compounding') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                  newProduction.revenueProduction + 1
+                );
+              }
+              // PERSONA TRAIT: Monetizer (Susan eng) - Monetization gives +1 Rev Production
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Monetizer') {
                 newProduction.revenueProduction = Math.min(
                   PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
                   newProduction.revenueProduction + 1
@@ -1539,6 +1873,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
               }
               break;
           }
+
+          // PERSONA TRAIT: Community Manager (Whitney eng) - rating cannot decrease from assigned action
+          if (hasCommunityManager && newMetrics.rating < ratingBeforeAction) {
+            newMetrics.rating = ratingBeforeAction;
+          }
+
+          // PERSONA TRAIT: Admiral's Discipline (Grace eng) - action generates 0 tech debt
+          if (hasAdmiralsDiscipline && newResources.techDebt > debtBeforeAction) {
+            newResources.techDebt = debtBeforeAction;
+          }
+
+          // LEADER PASSIVE: hype-machine (Elom Tusk) - +500 MAU any action, ±200 variance
+          if (player.leader?.leaderSide.passive.id === 'hype-machine') {
+            const variance = Math.floor(Math.random() * 401) - 200; // -200 to +200
+            newMetrics.mau = Math.max(0, newMetrics.mau + 500 + variance);
+          }
         }
 
         // Apply tech debt production penalties
@@ -1591,32 +1941,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
           if (eng.isPersona && eng.personaTrait?.name === 'Philanthropist') {
             newResources.money += 5;
           }
-          // TODO: Other persona trait per-round effects
         }
 
-        // TODO: Leader passives not yet implemented:
-        // hype-machine (Elom Tusk): +500 MAU any action, +/-200 variance
-        // network-effects (Mark Zucker): +500 MAU when anyone uses Marketing
-        // immutable-ledger (Satoshi): no Marketing, immune to Data Breach
-        // gpu-royalties (Jensen): Research AI gives +1 AI capacity
-        // alignment-tax (Sam Chatman): AI no debt, -1 rating if AI used
-        // trust-safety (Whitney): rating floor 4, Marketing +1 rating
-        // marketplace-tax (Gabe Newdeal): +$3 per opponent Develop Features
-        // dual-focus (Jack Blocksey): two exclusive actions/round
-        // crisis-resilience (Brian Spare-key): gain MAU when opponents market
+        // trust-safety (Whitney Buzz Herd): rating floor of 4
+        if (player.leader?.leaderSide.passive.id === 'trust-safety') {
+          newMetrics.rating = Math.max(4, newMetrics.rating);
+        }
 
-        // TODO: Persona traits not yet implemented:
-        // Perfectionist (Steeve eng): Develop Features +1 rating -200 MAU
-        // Volatile (Elom eng): +2 power on Research AI, AI +1 extra debt
-        // Researcher (Lora eng): no specialty bonus on non-AI, double on AI
-        // Decentralist (Satoshi eng): AI debt halved for this engineer
-        // Parallel Processor (Jensen eng): Research AI gives +1 server capacity
-        // Alignment Researcher (Sam eng): +2 on Research AI, -1 if AI Capacity > 6
-        // Monetizer (Susan eng): Monetization +1 Rev Prod (custom)
-        // Protocol Purist (Jack eng): +1 on Pay Down Debt, immune to event debt
-        // Community Manager (Whitney eng): rating cannot decrease from assigned action
-        // Admiral's Discipline (Grace eng): assigned action generates 0 tech debt
-        // Resilience Architect (Brian eng): +1 on Upgrade Servers, +1 server on negative event
+        // network-effects (Mark Zucker): +500 MAU when ANY player used Marketing this round
+        if (player.leader?.leaderSide.passive.id === 'network-effects') {
+          const anyoneUsedMarketing = updatedPlayers.some(p =>
+            p.plannedActions.some(a => a.actionType === 'marketing')
+          );
+          if (anyoneUsedMarketing) {
+            newMetrics.mau += 500;
+          }
+        }
+
+        // marketplace-tax (Gabe Newdeal): +$3 per opponent who used Develop Features
+        if (player.leader?.leaderSide.passive.id === 'marketplace-tax') {
+          const opponentsDeveloping = updatedPlayers.filter(p =>
+            p.id !== player.id && p.plannedActions.some(a => a.actionType === 'develop-features')
+          ).length;
+          newResources.money += opponentsDeveloping * 3;
+        }
+
+        // crisis-resilience (Brian Spare-Key): +200 MAU when opponents used Marketing or Go Viral
+        if (player.leader?.leaderSide.passive.id === 'crisis-resilience') {
+          const opponentsMarketed = updatedPlayers.some(p =>
+            p.id !== player.id && p.plannedActions.some(a =>
+              a.actionType === 'marketing' || a.actionType === 'go-viral'
+            )
+          );
+          if (opponentsMarketed) {
+            newMetrics.mau += 200;
+          }
+        }
 
         // Clamp production tracks to valid ranges
         newProduction.mauProduction = Math.max(0, Math.min(
@@ -1704,6 +2064,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // DEBT-IMMUNITY ABILITY: Check if player has immunity to event debt
         const hasDebtImmunity = hasAbility(player, 'debt-immunity');
 
+        // PERSONA TRAIT: Protocol Purist (Jack eng) - immune to event debt
+        const hasProtocolPurist = player.engineers.some(
+          e => e.isPersona && e.personaTrait?.name === 'Protocol Purist'
+        );
+
+        // LEADER PASSIVE: immutable-ledger (Satoshi) - immune to security-breach/data-breach events
+        const hasImmutableLedger = player.leader?.leaderSide.passive.id === 'immutable-ledger';
+        const isDataBreach = event.type === 'security-breach';
+
         const isMitigated = checkMitigation(
           event,
           player.resources,
@@ -1711,16 +2080,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
         );
 
         // If player has a startup veteran, treat as mitigated for negative effects
-        const effect = (isMitigated || hasVeteran) ? event.mitigation.reducedEffect : event.effect;
+        // Immutable-ledger makes data breaches fully mitigated
+        const effect = (isMitigated || hasVeteran || (hasImmutableLedger && isDataBreach))
+          ? event.mitigation.reducedEffect : event.effect;
 
         let newResources = { ...player.resources };
         let newMetrics = { ...player.metrics };
 
         // Apply resource changes
         if (effect.resourceChanges) {
-          // Calculate tech debt change (blocked if player has debt-immunity)
+          // Calculate tech debt change (blocked if player has debt-immunity or Protocol Purist)
           let techDebtChange = effect.resourceChanges.techDebt || 0;
-          if (hasDebtImmunity && techDebtChange > 0) {
+          if ((hasDebtImmunity || hasProtocolPurist) && techDebtChange > 0) {
             techDebtChange = 0; // Block positive (damaging) debt changes
           }
 
@@ -1754,6 +2125,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const overflow = newMetrics.mau - player.resources.serverCapacity * 100;
           newMetrics.mau -= Math.round(overflow / 2);
           newMetrics.rating = Math.max(1, newMetrics.rating - 2); // -2 rating for crash
+        }
+
+        // PERSONA TRAIT: Resilience Architect (Brian eng) - +1 server capacity on negative event
+        const hasResilienceArchitect = player.engineers.some(
+          e => e.isPersona && e.personaTrait?.name === 'Resilience Architect'
+        );
+        if (hasResilienceArchitect && !isMitigated) {
+          newResources.serverCapacity += 1;
         }
 
         return {
@@ -1851,6 +2230,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         occupiedActions: new Map(),
         draftOrder,
         upcomingEvent, // Show next quarter's event during planning
+        activeTheme: getThemeForRound(state.quarterlyThemes, nextRound),
       },
     });
   },
@@ -1937,6 +2317,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   isActionAvailable: (playerId: string, action: ActionType) => {
     const state = get();
+    const player = state.players.find(p => p.id === playerId);
     const actionSpace = getActionSpace(action);
 
     // Check if action is unlocked for this round
@@ -1944,16 +2325,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return false;
     }
 
+    // LEADER PASSIVE: immutable-ledger (Satoshi) - cannot use Marketing
+    if (player?.leader?.leaderSide.passive.id === 'immutable-ledger' && action === 'marketing') {
+      return false;
+    }
+
     // If no max workers, always available
     if (actionSpace.maxWorkers === undefined) return true;
 
+    // LEADER PASSIVE: dual-focus (Jack Blocksey) - can use two exclusive actions per round
+    // Treat maxWorkers slots as +1 for this player
     const occupied = state.roundState.occupiedActions.get(action) || [];
+    const hasDualFocus = player?.leader?.leaderSide.passive.id === 'dual-focus';
 
     // If player already has an engineer on this action, they can add more
     if (occupied.includes(playerId)) return true;
 
+    // Dual-focus allows claiming an extra slot on exclusive actions
+    const effectiveMax = hasDualFocus ? (actionSpace.maxWorkers + 1) : actionSpace.maxWorkers;
+
     // Otherwise check if there's room
-    return occupied.length < actionSpace.maxWorkers;
+    return occupied.length < effectiveMax;
   },
 
   getActionOccupancy: (action: ActionType) => {
@@ -2010,6 +2402,136 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }));
 
     return true;
+  },
+
+  // ============================================
+  // SEQUENTIAL ACTION DRAFT
+  // ============================================
+
+  claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => {
+    const state = get();
+
+    // Only works in sequential planning mode
+    if (state.planningMode !== 'sequential') return;
+
+    const draft = state.roundState.sequentialDraft;
+    if (!draft || draft.isComplete) return;
+
+    // Verify it's this player's turn
+    const currentPickerId = draft.pickOrder[draft.currentPickerIndex];
+    if (currentPickerId !== playerId) return;
+
+    // Delegate to the existing assignEngineer logic
+    get().assignEngineer(playerId, engineerId, actionType, useAi);
+
+    // After assigning, increment picksCompleted and advance the draft
+    set((state) => {
+      const currentDraft = state.roundState.sequentialDraft;
+      if (!currentDraft) return state;
+
+      return {
+        roundState: {
+          ...state.roundState,
+          sequentialDraft: {
+            ...currentDraft,
+            picksCompleted: currentDraft.picksCompleted + 1,
+          },
+        },
+      };
+    });
+
+    // Advance to the next picker
+    get().advanceSequentialDraft();
+  },
+
+  advanceSequentialDraft: () => {
+    set((state) => {
+      const draft = state.roundState.sequentialDraft;
+      if (!draft || draft.isComplete) return state;
+
+      // Check if all engineers have been assigned across all players
+      const totalUnassignedEngineers = state.players.reduce(
+        (count, player) => count + player.engineers.filter(e => !e.assignedAction).length,
+        0
+      );
+
+      // If no more unassigned engineers or we've hit the picks limit, complete the draft
+      if (totalUnassignedEngineers === 0 || draft.picksCompleted >= draft.picksPerRound) {
+        // Auto-lock all plans and move to reveal
+        const playersLocked = state.players.map(p => ({
+          ...p,
+          isReady: true,
+        }));
+
+        return {
+          players: playersLocked,
+          phase: 'reveal' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'reveal' as GamePhase,
+            sequentialDraft: {
+              ...draft,
+              isComplete: true,
+            },
+          },
+        };
+      }
+
+      // Snake draft order: for N players, goes 0,1,...,N-1,N-1,...,1,0,0,1,...
+      // The pick order array already has the full snake sequence pre-built
+      // We just advance currentPickerIndex through it
+      let nextIndex = draft.currentPickerIndex + 1;
+
+      // Wrap around if we've gone past the end of the pick order
+      if (nextIndex >= draft.pickOrder.length) {
+        nextIndex = 0;
+      }
+
+      // Skip players who have no unassigned engineers
+      let attempts = 0;
+      const maxAttempts = draft.pickOrder.length;
+      while (attempts < maxAttempts) {
+        const nextPlayerId = draft.pickOrder[nextIndex];
+        const nextPlayer = state.players.find(p => p.id === nextPlayerId);
+        const hasUnassigned = nextPlayer?.engineers.some(e => !e.assignedAction);
+
+        if (hasUnassigned) break;
+
+        nextIndex = (nextIndex + 1) % draft.pickOrder.length;
+        attempts++;
+      }
+
+      // If we couldn't find anyone with unassigned engineers, complete the draft
+      if (attempts >= maxAttempts) {
+        const playersLocked = state.players.map(p => ({
+          ...p,
+          isReady: true,
+        }));
+
+        return {
+          players: playersLocked,
+          phase: 'reveal' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'reveal' as GamePhase,
+            sequentialDraft: {
+              ...draft,
+              isComplete: true,
+            },
+          },
+        };
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          sequentialDraft: {
+            ...draft,
+            currentPickerIndex: nextIndex,
+          },
+        },
+      };
+    });
   },
 
   // ============================================

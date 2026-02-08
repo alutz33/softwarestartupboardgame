@@ -204,6 +204,10 @@ export function PlanningPhase() {
   const isActionAvailable = useGameStore((state) => state.isActionAvailable);
   const getActionOccupancy = useGameStore((state) => state.getActionOccupancy);
   const usePivotPower = useGameStore((state) => state.usePivotPower);
+  const quarterlyThemes = useGameStore((s) => s.quarterlyThemes);
+
+  // Get active quarterly theme for current round
+  const activeTheme = roundState.activeTheme;
 
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
   const [selectedEngineer, setSelectedEngineer] = useState<string | null>(null);
@@ -460,6 +464,22 @@ export function PlanningPhase() {
               </div>
             </div>
 
+            {/* Quarterly Theme Banner */}
+            {activeTheme && (
+              <div className="mb-4 p-3 bg-purple-900/20 border border-purple-700/50 rounded-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-purple-400 text-sm font-semibold">QUARTERLY THEME</span>
+                  <Badge variant="info" size="sm">{activeTheme.name}</Badge>
+                </div>
+                <div className="text-xs text-gray-400">{activeTheme.description}</div>
+                {activeTheme.modifiers.restrictedActions && activeTheme.modifiers.restrictedActions.length > 0 && (
+                  <div className="text-xs text-red-400 mt-1">
+                    Restricted: {activeTheme.modifiers.restrictedActions.join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Event Forecasting - Show upcoming event */}
             {upcomingEvent && (
               <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
@@ -570,6 +590,40 @@ export function PlanningPhase() {
               players={players}
               currentPlayerId={currentPlayer.id}
             />
+
+            {/* Quarterly Themes Overview */}
+            {quarterlyThemes.length > 0 && (
+              <HelpCard title="Quarterly Themes" variant="rule" collapsible defaultExpanded={false}>
+                <div className="space-y-2 text-xs">
+                  {quarterlyThemes.map((theme, index) => {
+                    const isCurrent = activeTheme?.id === theme.id;
+                    return (
+                      <div
+                        key={theme.id}
+                        className={`rounded p-2 ${
+                          isCurrent
+                            ? 'bg-purple-900/40 border border-purple-500/50'
+                            : 'bg-gray-900/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`font-semibold ${isCurrent ? 'text-purple-400' : 'text-gray-400'}`}>
+                            Q{index + 1}
+                          </span>
+                          <span className={isCurrent ? 'text-white font-semibold' : 'text-gray-300'}>
+                            {theme.name}
+                          </span>
+                          {isCurrent && (
+                            <Badge variant="info" size="sm">Current</Badge>
+                          )}
+                        </div>
+                        <p className="text-gray-500 text-[10px] mt-1">{theme.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </HelpCard>
+            )}
 
             {/* Engineer Traits Guide */}
             <HelpCard title="Engineer Traits" variant="info" collapsible defaultExpanded={false}>
