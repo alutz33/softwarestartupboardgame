@@ -1,4 +1,6 @@
 export { SetupScreen } from './SetupScreen';
+export { LeaderDraft } from './LeaderDraft';
+export { FundingSelection } from './FundingSelection';
 export { CorporationSelection } from './CorporationSelection';
 export { StartupCardDraft } from './StartupCardDraft';
 export { EngineerDraft } from './EngineerDraft';

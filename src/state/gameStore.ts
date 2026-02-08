@@ -255,6 +255,332 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }));
   },
 
+  // ============================================
+  // PHASE 2: Leader Draft & Funding Selection
+  // ============================================
+
+  selectLeader: (playerId: string, personaId: string) => {
+    set((state) => {
+      const dealtCards = state.dealtLeaderCards.get(playerId) || [];
+      const selectedCard = dealtCards.find(c => c.id === personaId);
+      if (!selectedCard) return state;
+
+      // Return unchosen cards to the persona deck
+      const unchosenCards = dealtCards.filter(c => c.id !== personaId);
+      const updatedPersonaDeck = [...state.personaDeck, ...unchosenCards];
+
+      // Update player with selected leader
+      const updatedPlayers = state.players.map(p => {
+        if (p.id !== playerId) return p;
+        return { ...p, leader: selectedCard, isReady: true };
+      });
+
+      // Check if all players have selected leaders
+      const allSelected = updatedPlayers.every(p => p.leader);
+
+      if (allSelected) {
+        // Transition to funding-selection phase
+        return {
+          players: updatedPlayers.map(p => ({ ...p, isReady: false })),
+          personaDeck: updatedPersonaDeck,
+          phase: 'funding-selection' as GamePhase,
+        };
+      }
+
+      return {
+        players: updatedPlayers,
+        personaDeck: updatedPersonaDeck,
+      };
+    });
+  },
+
+  selectFunding: (playerId: string, fundingType: FundingType) => {
+    set((state) => {
+      const player = state.players.find(p => p.id === playerId);
+      if (!player || !player.leader) return state;
+
+      const funding = FUNDING_OPTIONS.find(f => f.id === fundingType)!;
+      const leaderBonus = player.leader.leaderSide.startingBonus;
+
+      // Product type comes from leader's productLock - use first option
+      const productType = player.leader.leaderSide.productLock[0];
+      const product = PRODUCT_OPTIONS.find(p => p.id === productType)!;
+
+      // Default tech approach based on leader (simplified - use ai-first if leader has AI bonuses)
+      const techType = leaderBonus.aiCapacity && leaderBonus.aiCapacity >= 3 ? 'ai-first' : 'quality-focused';
+      const tech = TECH_OPTIONS.find(t => t.id === techType)!;
+
+      // Calculate starting resources from funding + tech
+      const baseResources = getStartingResources(funding, tech);
+      const baseMetrics = getStartingMetrics(product);
+      const baseProduction = getStartingProductionTracks(product, tech);
+
+      // Apply leader starting bonuses on top
+      const resources = {
+        money: baseResources.money + (leaderBonus.money || 0),
+        serverCapacity: baseResources.serverCapacity + (leaderBonus.serverCapacity || 0),
+        aiCapacity: leaderBonus.aiCapacity !== undefined
+          ? leaderBonus.aiCapacity + baseResources.aiCapacity
+          : baseResources.aiCapacity,
+        techDebt: leaderBonus.techDebt !== undefined
+          ? leaderBonus.techDebt
+          : baseResources.techDebt,
+      };
+
+      const metrics = {
+        mau: baseMetrics.mau,
+        revenue: baseMetrics.revenue,
+        rating: leaderBonus.rating !== undefined ? leaderBonus.rating : baseMetrics.rating,
+      };
+
+      const productionTracks = {
+        mauProduction: baseProduction.mauProduction + (leaderBonus.mauProduction || 0),
+        revenueProduction: baseProduction.revenueProduction + (leaderBonus.revenueProduction || 0),
+      };
+
+      // Clamp production tracks
+      productionTracks.mauProduction = Math.min(
+        PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+        Math.max(0, productionTracks.mauProduction)
+      );
+      productionTracks.revenueProduction = Math.min(
+        PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+        Math.max(0, productionTracks.revenueProduction)
+      );
+
+      // Create strategy
+      const strategy: CorporationStrategy = {
+        funding: fundingType,
+        tech: techType as CorporationStrategy['tech'],
+        product: productType,
+      };
+
+      const updatedPlayers = state.players.map(p => {
+        if (p.id !== playerId) return p;
+        return {
+          ...p,
+          strategy,
+          resources,
+          metrics,
+          productionTracks,
+          isReady: true,
+          powerUsesRemaining: 1, // Leader power once per game
+        };
+      });
+
+      // Check if all players have selected funding
+      const allSelected = updatedPlayers.every(p => p.strategy);
+
+      if (allSelected) {
+        // Generate first engineer pool
+        let engineerPool = generateEngineerPool(
+          1,
+          updatedPlayers.length,
+          updatedPlayers.map(p => p.hasRecruiterBonus)
+        );
+
+        // Draw 2 persona cards for the round's persona pool
+        const { drawn: personaPool, remainingDeck: newPersonaDeck } =
+          drawPersonasForRound(state.personaDeck, 2);
+
+        // EVENT FORECASTING: Peek at first quarter's event
+        const eventDeck = [...state.eventDeck];
+        const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
+
+        // Initial draft order is random
+        const draftOrder = updatedPlayers.map(p => p.id);
+
+        return {
+          players: updatedPlayers,
+          personaDeck: newPersonaDeck,
+          phase: 'engineer-draft' as GamePhase,
+          currentRound: 1,
+          currentQuarter: 1,
+          roundState: {
+            roundNumber: 1,
+            phase: 'engineer-draft' as GamePhase,
+            engineerPool,
+            personaPool,
+            currentBids: new Map(),
+            bidResults: [],
+            occupiedActions: new Map(),
+            draftOrder,
+            upcomingEvent,
+          },
+        };
+      }
+
+      return { players: updatedPlayers };
+    });
+  },
+
+  getDealtLeaderCards: (playerId: string) => {
+    return get().dealtLeaderCards.get(playerId) || [];
+  },
+
+  // ============================================
+  // PHASE 2: Persona Auction Actions
+  // ============================================
+
+  startPersonaAuction: (personaCardId: string) => {
+    set((state) => {
+      const personaCard = state.roundState.personaPool.find(
+        c => c.id === personaCardId
+      );
+      if (!personaCard) return state;
+
+      // Bidding order: lowest MAU first
+      const biddingOrder = [...state.players]
+        .sort((a, b) => a.metrics.mau - b.metrics.mau)
+        .map(p => p.id);
+
+      const auctionState: PersonaAuctionState = {
+        personaCard,
+        currentBid: 10, // Starting bid (minimum $15 to actually bid)
+        currentBidderId: undefined,
+        passedPlayers: [],
+        biddingOrder,
+        currentBidderIndex: 0,
+        isComplete: false,
+      };
+
+      return {
+        roundState: {
+          ...state.roundState,
+          personaAuction: auctionState,
+        },
+      };
+    });
+  },
+
+  placeBid: (playerId: string, amount: number) => {
+    set((state) => {
+      const auction = state.roundState.personaAuction;
+      if (!auction || auction.isComplete) return state;
+
+      // Bid must be at least $5 more than current bid (minimum $15)
+      const minBid = Math.max(15, auction.currentBid + 5);
+      if (amount < minBid) return state;
+
+      // Check player can afford it
+      const player = state.players.find(p => p.id === playerId);
+      if (!player || player.resources.money < amount) return state;
+
+      // Advance to next bidder who hasn't passed
+      let nextIndex = (auction.currentBidderIndex + 1) % auction.biddingOrder.length;
+      const passedSet = new Set(auction.passedPlayers);
+      while (passedSet.has(auction.biddingOrder[nextIndex]) && nextIndex !== auction.currentBidderIndex) {
+        nextIndex = (nextIndex + 1) % auction.biddingOrder.length;
+      }
+
+      // Check if only the current bidder is left (everyone else passed)
+      const activeBidders = auction.biddingOrder.filter(id => !passedSet.has(id));
+      const isComplete = activeBidders.length <= 1;
+
+      return {
+        roundState: {
+          ...state.roundState,
+          personaAuction: {
+            ...auction,
+            currentBid: amount,
+            currentBidderId: playerId,
+            currentBidderIndex: nextIndex,
+            isComplete,
+          },
+        },
+      };
+    });
+  },
+
+  passAuction: (playerId: string) => {
+    set((state) => {
+      const auction = state.roundState.personaAuction;
+      if (!auction || auction.isComplete) return state;
+
+      const newPassedPlayers = [...auction.passedPlayers, playerId];
+      const activeBidders = auction.biddingOrder.filter(
+        id => !newPassedPlayers.includes(id)
+      );
+
+      // If all but one passed (or all passed with no bidder), auction is complete
+      const isComplete = activeBidders.length <= 1;
+
+      if (isComplete && auction.currentBidderId) {
+        // Winner! Convert persona to hired engineer and add to winner's team
+        const winner = state.players.find(p => p.id === auction.currentBidderId);
+        if (!winner) return state;
+
+        const engineerData = personaToEngineer(auction.personaCard);
+
+        // Apply lean-efficiency leader passive: hiring costs -$5
+        let hireCost = auction.currentBid;
+        if (winner.leader?.leaderSide.passive.id === 'lean-efficiency') {
+          hireCost = Math.max(0, hireCost - 5);
+        }
+
+        const hiredEngineer: HiredEngineer = {
+          ...engineerData,
+          playerId: auction.currentBidderId,
+          salaryPaid: hireCost,
+          hasAiAugmentation: false,
+          roundsRetained: 1,
+        };
+
+        // Remove from persona pool
+        const updatedPersonaPool = state.roundState.personaPool.filter(
+          c => c.id !== auction.personaCard.id
+        );
+
+        return {
+          players: state.players.map(p => {
+            if (p.id !== auction.currentBidderId) return p;
+            return {
+              ...p,
+              resources: {
+                ...p.resources,
+                money: p.resources.money - hireCost,
+              },
+              engineers: [...p.engineers, hiredEngineer],
+            };
+          }),
+          roundState: {
+            ...state.roundState,
+            personaPool: updatedPersonaPool,
+            personaAuction: undefined, // Clear auction
+          },
+        };
+      }
+
+      if (isComplete && !auction.currentBidderId) {
+        // No one bid - card stays in pool but auction ends
+        return {
+          roundState: {
+            ...state.roundState,
+            personaAuction: undefined,
+          },
+        };
+      }
+
+      // Advance to next active bidder
+      let nextIndex = (auction.currentBidderIndex + 1) % auction.biddingOrder.length;
+      while (newPassedPlayers.includes(auction.biddingOrder[nextIndex])) {
+        nextIndex = (nextIndex + 1) % auction.biddingOrder.length;
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          personaAuction: {
+            ...auction,
+            passedPlayers: newPassedPlayers,
+            currentBidderIndex: nextIndex,
+            isComplete,
+          },
+        },
+      };
+    });
+  },
+
   selectStrategy: (playerId: string, strategy: CorporationStrategy) => {
     const funding = FUNDING_OPTIONS.find((f) => f.id === strategy.funding)!;
     const tech = TECH_OPTIONS.find((t) => t.id === strategy.tech)!;
@@ -517,6 +843,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
               let actualCost = bid.amount;
               if (player.strategy?.funding === 'bootstrapped') {
                 actualCost = Math.round(bid.amount * 0.8);
+              }
+              // LEADER PASSIVE: lean-efficiency (Silica Su) - hiring costs -$5
+              if (player.leader?.leaderSide.passive.id === 'lean-efficiency') {
+                actualCost = Math.max(0, actualCost - 5);
               }
 
               updatedPlayers[playerIndex] = {
@@ -967,6 +1297,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
             totalPower += 1;
           }
 
+          // LEADER PASSIVE: enterprise-culture (William Doors) - +1 power on Develop Features
+          if (player.leader?.leaderSide.passive.id === 'enterprise-culture' &&
+              action.actionType === 'develop-features') {
+            totalPower += 1;
+          }
+
+          // PERSONA ENGINEER TRAIT: Flat Hierarchy - +2 power if only engineer on action
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Flat Hierarchy') {
+            const engineersOnSameAction = player.plannedActions.filter(
+              a => a.actionType === action.actionType
+            ).length;
+            if (engineersOnSameAction === 1) {
+              totalPower += 2;
+            }
+          }
+
           // TECH DEBT POWER PENALTY (integer: -1 per 4 debt)
           const currentDebtLevel = getTechDebtLevel(newResources.techDebt);
           if (action.actionType !== 'pay-down-debt') {
@@ -978,6 +1324,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
             let aiDebt = getAiDebt(engineer.level);
             // AI-first strategy: 50% less debt (round up)
             if (player.strategy?.tech === 'ai-first') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            // LEADER PASSIVE: efficient-ai (Lora Page) - AI generates 50% less debt (ceil)
+            if (player.leader?.leaderSide.passive.id === 'efficient-ai') {
               aiDebt = Math.ceil(aiDebt * 0.5);
             }
             newResources.techDebt += aiDebt;
@@ -1000,25 +1350,40 @@ export const useGameStore = create<GameStore>((set, get) => ({
                 );
                 costsPaid.add('develop-features-production');
               }
+              // PERSONA TRAIT: Process Optimizer - Develop Features gives +1 Rev Production
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Process Optimizer') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                  newProduction.revenueProduction + 1
+                );
+              }
               break;
             }
 
-            case 'optimize-code':
+            case 'optimize-code': {
               newResources.techDebt = Math.max(0, newResources.techDebt - 1);
-              // +1 rating (integer)
-              newMetrics.rating = Math.min(
-                10,
-                newMetrics.rating + (actionSpace.effect.ratingChange || 0)
-              );
+              // +1 rating (integer), or +2 with double-optimize leader passive (Grace Debugger)
+              let optimizeRating = actionSpace.effect.ratingChange || 0;
+              if (player.leader?.leaderSide.passive.id === 'double-optimize') {
+                optimizeRating = 2; // +2 rating instead of +1
+              }
+              newMetrics.rating = Math.min(10, newMetrics.rating + optimizeRating);
               break;
+            }
 
-            case 'pay-down-debt':
+            case 'pay-down-debt': {
               // Guaranteed -2 debt per engineer
+              let debtReduction = 2;
+              // PERSONA TRAIT: Optimizer - Pay Down Debt removes 1 extra debt
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
+                debtReduction += 1;
+              }
               newResources.techDebt = Math.max(
                 0,
-                newResources.techDebt - 2
+                newResources.techDebt - debtReduction
               );
               break;
+            }
 
             case 'upgrade-servers':
               // Pay cost once per action type
@@ -1073,6 +1438,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
                 10,
                 newMetrics.rating + (actionSpace.effect.ratingChange || 0)
               );
+              // PERSONA TRAIT: Growth Hacker or Content Algorithm - Marketing gives +1 MAU Production
+              if (engineer.isPersona &&
+                  (engineer.personaTrait?.name === 'Growth Hacker' ||
+                   engineer.personaTrait?.name === 'Content Algorithm')) {
+                newProduction.mauProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                  newProduction.mauProduction + 1
+                );
+              }
               break;
             }
 
@@ -1084,6 +1458,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
               // Apply revenue-boost ability (+20%)
               if (hasAbility(player, 'revenue-boost')) {
                 revenue = Math.round(revenue * 1.2);
+              }
+              // PERSONA TRAIT: Enterprise Sales - Monetization gives +$5 flat bonus
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Enterprise Sales') {
+                revenue += 5;
               }
               newMetrics.revenue += revenue;
               // -1 rating from monetization (integer)
@@ -1098,6 +1476,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   newProduction.revenueProduction + (actionSpace.effect.revenueProductionDelta || 0)
                 );
                 costsPaid.add('monetization-production');
+              }
+              // LEADER PASSIVE: saas-compounding (Marc Cloudoff) - Monetization gives +1 Rev Production
+              if (player.leader?.leaderSide.passive.id === 'saas-compounding') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                  newProduction.revenueProduction + 1
+                );
               }
               break;
             }
@@ -1173,6 +1558,65 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (player.strategy?.tech === 'quality-focused') {
           newMetrics.rating = Math.min(10, newMetrics.rating + 1);
         }
+
+        // ============================================
+        // LEADER PASSIVE EFFECTS (applied per round)
+        // ============================================
+
+        // perfectionist (Steeve Careers): +1 rating every round
+        if (player.leader?.leaderSide.passive.id === 'perfectionist') {
+          newMetrics.rating = Math.min(10, newMetrics.rating + 1);
+        }
+
+        // ad-network (Susan Fry): +$5 income per round
+        if (player.leader?.leaderSide.passive.id === 'ad-network') {
+          newResources.money += 5;
+        }
+
+        // infrastructure-empire (Jess Bezos): +2 server capacity per round
+        if (player.leader?.leaderSide.passive.id === 'infrastructure-empire') {
+          newResources.serverCapacity += 2;
+        }
+
+        // subscriber-loyalty (Binge Hastings): +1 Rev Production if rating >= 6 at end of round
+        if (player.leader?.leaderSide.passive.id === 'subscriber-loyalty' && newMetrics.rating >= 6) {
+          newProduction.revenueProduction = Math.min(
+            PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+            newProduction.revenueProduction + 1
+          );
+        }
+
+        // PERSONA TRAIT: Philanthropist (William Doors eng) - +$5 income/round while employed
+        for (const eng of player.engineers) {
+          if (eng.isPersona && eng.personaTrait?.name === 'Philanthropist') {
+            newResources.money += 5;
+          }
+          // TODO: Other persona trait per-round effects
+        }
+
+        // TODO: Leader passives not yet implemented:
+        // hype-machine (Elom Tusk): +500 MAU any action, +/-200 variance
+        // network-effects (Mark Zucker): +500 MAU when anyone uses Marketing
+        // immutable-ledger (Satoshi): no Marketing, immune to Data Breach
+        // gpu-royalties (Jensen): Research AI gives +1 AI capacity
+        // alignment-tax (Sam Chatman): AI no debt, -1 rating if AI used
+        // trust-safety (Whitney): rating floor 4, Marketing +1 rating
+        // marketplace-tax (Gabe Newdeal): +$3 per opponent Develop Features
+        // dual-focus (Jack Blocksey): two exclusive actions/round
+        // crisis-resilience (Brian Spare-key): gain MAU when opponents market
+
+        // TODO: Persona traits not yet implemented:
+        // Perfectionist (Steeve eng): Develop Features +1 rating -200 MAU
+        // Volatile (Elom eng): +2 power on Research AI, AI +1 extra debt
+        // Researcher (Lora eng): no specialty bonus on non-AI, double on AI
+        // Decentralist (Satoshi eng): AI debt halved for this engineer
+        // Parallel Processor (Jensen eng): Research AI gives +1 server capacity
+        // Alignment Researcher (Sam eng): +2 on Research AI, -1 if AI Capacity > 6
+        // Monetizer (Susan eng): Monetization +1 Rev Prod (custom)
+        // Protocol Purist (Jack eng): +1 on Pay Down Debt, immune to event debt
+        // Community Manager (Whitney eng): rating cannot decrease from assigned action
+        // Admiral's Discipline (Grace eng): assigned action generates 0 tech debt
+        // Resilience Architect (Brian eng): +1 on Upgrade Servers, +1 server on negative event
 
         // Clamp production tracks to valid ranges
         newProduction.mauProduction = Math.max(0, Math.min(
@@ -1386,8 +1830,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       .sort((a, b) => a.metrics.mau - b.metrics.mau)
       .map(p => p.id);
 
+    // Phase 2: Draw persona cards for the round's persona pool
+    const personaDrawCount = nextRound >= 3 ? 3 : 2; // More persona engineers in later rounds
+    const { drawn: personaPool, remainingDeck: newPersonaDeck } =
+      drawPersonasForRound(state.personaDeck, personaDrawCount);
+
     set({
       players: playersAfterProduction,
+      personaDeck: newPersonaDeck,
       currentRound: nextRound,
       currentQuarter: nextRound,
       phase: 'engineer-draft',
@@ -1395,7 +1845,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         roundNumber: nextRound,
         phase: 'engineer-draft',
         engineerPool,
-        personaPool: [],
+        personaPool,
         currentBids: new Map(),
         bidResults: [],
         occupiedActions: new Map(),

@@ -1,6 +1,8 @@
 import { useGameStore } from './state/gameStore';
 import {
   SetupScreen,
+  LeaderDraft,
+  FundingSelection,
   CorporationSelection,
   StartupCardDraft,
   EngineerDraft,
@@ -21,6 +23,10 @@ function App() {
     switch (phase) {
       case 'setup':
         return <SetupScreen />;
+      case 'leader-draft':
+        return <LeaderDraft />;
+      case 'funding-selection':
+        return <FundingSelection />;
       case 'startup-draft':
         return <StartupCardDraft />;
       case 'corporation-selection':
