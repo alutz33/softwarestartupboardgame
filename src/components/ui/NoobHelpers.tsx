@@ -123,7 +123,7 @@ export function ActionPreview({ player, actionType, engineer, useAi = false }: A
           <>
             <span className="text-gray-400">Rating:</span>
             <span className={changes.rating > 0 ? 'text-green-400' : 'text-red-400'}>
-              {changes.rating > 0 ? '+' : ''}{changes.rating.toFixed(1)}
+              {changes.rating > 0 ? '+' : ''}{changes.rating}
             </span>
           </>
         )}
@@ -187,10 +187,10 @@ function calculateActionChanges(
     scoreImpact: 0,
   };
 
-  // Base productivity
-  const productivity = engineer?.productivity || 0.5;
-  const aiMultiplier = useAi ? (engineer?.level === 'senior' ? 1.5 : 2.0) : 1.0;
-  const outputMultiplier = productivity * aiMultiplier;
+  // Integer power system
+  const basePower = engineer?.power || 2;
+  const aiBonus = useAi ? 2 : 0;
+  const totalPower = basePower + aiBonus;
 
   // AI debt
   if (useAi && engineer) {
@@ -201,48 +201,43 @@ function calculateActionChanges(
 
   switch (actionType) {
     case 'develop-features':
-      changes.mau = Math.round(500 * outputMultiplier);
-      if (player.strategy?.tech === 'move-fast') changes.mau += 200;
-      if (player.strategy?.product === 'consumer') changes.mau = Math.round(changes.mau * 2);
-      else if (player.strategy?.product === 'b2b') changes.mau = Math.round(changes.mau * 0.5);
+      changes.mau = 100 * totalPower;
       break;
 
     case 'optimize-code':
       changes.techDebt -= 1;
-      changes.rating = 0.1;
+      changes.rating = 1;
       break;
 
     case 'pay-down-debt':
-      changes.techDebt -= Math.round(2 * outputMultiplier);
+      changes.techDebt -= 2;
       break;
 
     case 'upgrade-servers':
       changes.money = -10;
-      changes.serverCapacity = Math.round(5 * outputMultiplier);
+      changes.serverCapacity = 5;
       break;
 
     case 'research-ai':
       changes.money = -15;
-      changes.aiCapacity = Math.round(2 * outputMultiplier);
+      changes.aiCapacity = 2;
       break;
 
     case 'marketing':
       changes.money = -20;
-      let mauGain = Math.round(1000 * outputMultiplier);
-      if (player.strategy?.funding === 'vc-heavy') mauGain = Math.round(mauGain * 1.5);
-      mauGain = Math.round(mauGain * (player.metrics.rating / 3));
+      let mauGain = 200 * totalPower;
+      if (player.strategy?.funding === 'vc-heavy') mauGain += 200 * 2;
+      mauGain = Math.round(mauGain * player.metrics.rating / 5);
       changes.mau = mauGain;
-      changes.rating = 0.1;
+      changes.rating = 1;
       break;
 
-    case 'monetization':
-      let rev = Math.round(300 * outputMultiplier);
-      rev = Math.round(rev * (player.metrics.mau / 1000));
-      if (player.strategy?.product === 'b2b') rev = Math.round(rev * 2);
-      else if (player.strategy?.product === 'consumer') rev = Math.round(rev * 0.5);
+    case 'monetization': {
+      let rev = Math.round(300 * totalPower * (player.metrics.mau / 1000));
       changes.revenue = rev;
-      changes.rating = -0.1;
+      changes.rating = -1;
       break;
+    }
 
     case 'hire-recruiter':
       changes.money = -25;
@@ -265,11 +260,11 @@ function calculateActionChanges(
       break;
   }
 
-  // Calculate score impact
+  // Calculate score impact (rating is now 1-10, 5pts per rating point)
   const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
   changes.scoreImpact += changes.mau / 1000;
   changes.scoreImpact += (changes.revenue / 500) * revenueMultiplier;
-  changes.scoreImpact += changes.rating * 10;
+  changes.scoreImpact += changes.rating * 5;
 
   return changes;
 }
@@ -291,7 +286,7 @@ export function PlayerStatsComparison({ players, currentPlayerId, compact = fals
     const score =
       player.metrics.mau / 1000 +
       (player.metrics.revenue / 500) * revenueMultiplier +
-      player.metrics.rating * 10 +
+      player.metrics.rating * 5 +
       (player.ipoBonusScore || 0) -
       (player.resources.techDebt >= 7 ? 10 : 0);
     return { player, score: Math.round(score * 10) / 10 };
@@ -373,7 +368,7 @@ export function PlayerStatsComparison({ players, currentPlayerId, compact = fals
                   : player.metrics.mau}
               </span>
               <span className="text-center text-green-400">${player.metrics.revenue}</span>
-              <span className="text-center text-yellow-400">{player.metrics.rating.toFixed(1)}</span>
+              <span className="text-center text-yellow-400">{player.metrics.rating}</span>
               <span className={`text-center ${player.resources.techDebt >= 7 ? 'text-red-400' : player.resources.techDebt >= 4 ? 'text-yellow-400' : 'text-gray-400'}`}>
                 {player.resources.techDebt}
               </span>
@@ -387,7 +382,7 @@ export function PlayerStatsComparison({ players, currentPlayerId, compact = fals
 
       {/* Legend */}
       <div className="mt-3 pt-2 border-t border-gray-700 text-[10px] text-gray-500">
-        Score = MAU/1000 + Rev/500 + Rating×10 - DebtPenalty
+        Score = MAU/1000 + Rev/500 + Rating×5 - DebtPenalty
       </div>
     </div>
   );
@@ -406,14 +401,14 @@ export function YourStats({ player }: YourStatsProps) {
   const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
   const mauPoints = Math.round((player.metrics.mau / 1000) * 10) / 10;
   const revenuePoints = Math.round((player.metrics.revenue / 500) * revenueMultiplier * 10) / 10;
-  const ratingPoints = Math.round(player.metrics.rating * 10 * 10) / 10;
+  const ratingPoints = Math.round(player.metrics.rating * 5 * 10) / 10;
   const ipoBonus = player.ipoBonusScore || 0;
   const debtPenalty = player.resources.techDebt >= 7 ? -10 : 0;
   const total = mauPoints + revenuePoints + ratingPoints + ipoBonus + debtPenalty;
 
-  // Get efficiency info
+  // Get power penalty info
   const debtLevel = getTechDebtLevel(player.resources.techDebt);
-  const efficiency = Math.round(debtLevel.efficiencyMultiplier * 100);
+  const powerPenalty = debtLevel.powerPenalty;
 
   return (
     <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
@@ -442,15 +437,15 @@ export function YourStats({ player }: YourStatsProps) {
         </div>
         <div className="bg-yellow-900/30 rounded p-2">
           <div className="text-[10px] text-yellow-400">Rating</div>
-          <div className="text-lg font-bold text-white">{player.metrics.rating.toFixed(1)}</div>
+          <div className="text-lg font-bold text-white">{player.metrics.rating}/10</div>
           <div className="text-[10px] text-gray-500">+{ratingPoints} pts</div>
         </div>
         <div className={`rounded p-2 ${player.resources.techDebt >= 10 ? 'bg-red-900/40' : player.resources.techDebt >= 7 ? 'bg-red-900/30' : player.resources.techDebt >= 4 ? 'bg-yellow-900/30' : 'bg-gray-900/30'}`}>
           <div className={`text-[10px] ${player.resources.techDebt >= 10 ? 'text-red-400' : player.resources.techDebt >= 7 ? 'text-orange-400' : player.resources.techDebt >= 4 ? 'text-yellow-400' : 'text-gray-400'}`}>Tech Debt</div>
           <div className="text-lg font-bold text-white">{player.resources.techDebt}</div>
           <div className="text-[10px] text-gray-500">
-            {efficiency < 100 && <span className="text-yellow-400">{efficiency}% eff</span>}
-            {efficiency === 100 && 'No penalty'}
+            {powerPenalty < 0 && <span className="text-yellow-400">{powerPenalty} power</span>}
+            {powerPenalty === 0 && 'No penalty'}
           </div>
           {debtLevel.blocksDevelopment && (
             <div className="text-[10px] text-red-400 font-bold">BLOCKED</div>
@@ -522,18 +517,18 @@ export function ActionTips({ player }: ActionTipsProps) {
   // Generate contextual tips based on debt
   if (debtLevel.blocksDevelopment) {
     tips.push('CRITICAL: Use Pay Down Debt to unlock Develop Features!');
-  } else if (player.resources.techDebt >= 7) {
-    tips.push(`HIGH DEBT: ${Math.round(debtLevel.efficiencyMultiplier * 100)}% efficiency. Pay down debt!`);
+  } else if (player.resources.techDebt >= 8) {
+    tips.push(`HIGH DEBT: ${debtLevel.powerPenalty} power penalty! Pay down debt!`);
   } else if (player.resources.techDebt >= 4) {
-    tips.push(`Rising debt: ${Math.round(debtLevel.efficiencyMultiplier * 100)}% efficiency. Consider cleanup`);
+    tips.push(`Rising debt: ${debtLevel.powerPenalty} power penalty. Consider cleanup`);
   }
   if (player.metrics.mau > player.resources.serverCapacity * 80) {
     tips.push('Near capacity: Upgrade Servers to handle growth');
   }
   if (player.resources.aiCapacity === 0 && player.resources.money >= 15) {
-    tips.push('No AI capacity: Research AI to boost productivity');
+    tips.push('No AI capacity: Research AI for +2 power per engineer');
   }
-  if (player.metrics.rating < 3.0) {
+  if (player.metrics.rating < 4) {
     tips.push('Low rating: Optimize Code or reduce monetization');
   }
   if (player.strategy?.funding === 'vc-heavy' && player.metrics.mau < 3000) {

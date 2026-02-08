@@ -14,7 +14,7 @@ export function WinCondition({ players, currentRound, totalRounds = 4 }: WinCond
     score += player.metrics.mau / 1000;
     const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
     score += (player.metrics.revenue / 500) * revenueMultiplier;
-    score += player.metrics.rating * 10;
+    score += player.metrics.rating * 5;
     if (player.resources.techDebt >= 7) score -= 10;
     return { player, score: Math.round(score * 10) / 10 };
   }).sort((a, b) => b.score - a.score);
@@ -86,7 +86,7 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
   const mauPoints = Math.round((player.metrics.mau / 1000) * 10) / 10;
   const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
   const revenuePoints = Math.round((player.metrics.revenue / 500) * revenueMultiplier * 10) / 10;
-  const ratingPoints = Math.round(player.metrics.rating * 10 * 10) / 10;
+  const ratingPoints = Math.round(player.metrics.rating * 5 * 10) / 10;
   const debtPenalty = player.resources.techDebt >= 7 ? -10 : 0;
   const total = mauPoints + revenuePoints + ratingPoints + milestonePoints + debtPenalty;
 
@@ -102,7 +102,7 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
         </span>
         <span className="text-right">+{revenuePoints}</span>
 
-        <span className="text-yellow-400">Rating ({player.metrics.rating.toFixed(1)}):</span>
+        <span className="text-yellow-400">Rating ({player.metrics.rating}/10):</span>
         <span className="text-right">+{ratingPoints}</span>
 
         {milestonePoints > 0 && (

@@ -154,7 +154,7 @@ function EngineerToken({
               : 'Jr'}
         </Badge>
         <span className="text-xs text-gray-400">
-          {Math.min(Math.round((engineer.productivity || 0) * 100), 100)}%
+          {engineer.power} pwr
         </span>
         {/* Engineer Trait Badge */}
         {trait && (
@@ -176,7 +176,7 @@ function EngineerToken({
       {/* Show rounds retained for equity-hungry */}
       {engineer.trait === 'equity-hungry' && (
         <div className="text-[10px] text-yellow-400 mt-1">
-          {engineer.roundsRetained >= 2 ? '+20% productivity!' : `Retained ${engineer.roundsRetained}/2 quarters`}
+          {engineer.roundsRetained >= 2 ? '+1 power!' : `Retained ${engineer.roundsRetained}/2 quarters`}
         </div>
       )}
       {isAssigned && engineer.assignedAction && (
@@ -354,10 +354,10 @@ export function PlanningPhase() {
           ))}
         </div>
 
-        {/* Tech Debt Efficiency Warning Banner */}
+        {/* Tech Debt Power Penalty Warning Banner */}
         {(() => {
           const debtLevel = getTechDebtLevel(currentPlayer.resources.techDebt);
-          if (debtLevel.efficiencyMultiplier < 1) {
+          if (debtLevel.powerPenalty < 0) {
             return (
               <div className={`mb-6 p-4 rounded-lg border ${
                 debtLevel.blocksDevelopment
@@ -370,9 +370,9 @@ export function PlanningPhase() {
                       {debtLevel.blocksDevelopment ? 'CRITICAL: Tech Debt Crisis!' : 'Tech Debt Warning'}
                     </div>
                     <p className="text-sm text-gray-300">
-                      All action output reduced to <span className="font-bold text-yellow-400">
-                        {Math.round(debtLevel.efficiencyMultiplier * 100)}%
-                      </span> efficiency
+                      All engineers suffer <span className="font-bold text-yellow-400">
+                        {debtLevel.powerPenalty} power
+                      </span> penalty
                     </p>
                   </div>
                   <div className="text-right">
@@ -383,10 +383,10 @@ export function PlanningPhase() {
                 {debtLevel.blocksDevelopment && (
                   <div className="mt-3 pt-3 border-t border-red-500/30">
                     <p className="text-red-300 text-sm font-semibold">
-                      Develop Features and Optimize Code are BLOCKED until debt is below 10!
+                      Develop Features and Optimize Code are BLOCKED until debt is below 12!
                     </p>
                     <p className="text-gray-400 text-xs mt-1">
-                      Use "Pay Down Debt" action (unaffected by efficiency penalty) to reduce debt.
+                      Use "Pay Down Debt" action (unaffected by power penalty) to reduce debt.
                     </p>
                   </div>
                 )}
@@ -578,11 +578,11 @@ export function PlanningPhase() {
                 <div className="space-y-2">
                   <div className="bg-orange-900/30 rounded p-2">
                     <span className="text-orange-400 font-semibold">AI Skeptic</span>
-                    <p className="text-gray-400 text-[10px]">Can't use AI, but +10% productivity</p>
+                    <p className="text-gray-400 text-[10px]">Can't use AI, but +1 base power</p>
                   </div>
                   <div className="bg-yellow-900/30 rounded p-2">
                     <span className="text-yellow-400 font-semibold">Equity-Hungry</span>
-                    <p className="text-gray-400 text-[10px]">+$5 cost, +20% if kept 2+ rounds</p>
+                    <p className="text-gray-400 text-[10px]">+$5 cost, +1 power if kept 2+ rounds</p>
                   </div>
                   <div className="bg-green-900/30 rounded p-2">
                     <span className="text-green-400 font-semibold">Startup Veteran</span>
@@ -590,7 +590,7 @@ export function PlanningPhase() {
                   </div>
                   <div className="bg-blue-900/30 rounded p-2">
                     <span className="text-blue-400 font-semibold">Night Owl</span>
-                    <p className="text-gray-400 text-[10px]">+30% on last action of round</p>
+                    <p className="text-gray-400 text-[10px]">+1 power on last action of round</p>
                   </div>
                 </div>
               </div>
@@ -599,19 +599,19 @@ export function PlanningPhase() {
             {/* AI Augmentation Help */}
             <HelpCard title="AI Augmentation" variant="tip" collapsible defaultExpanded={false}>
               <div className="space-y-2 text-xs">
-                <p>AI boosts engineer output but creates tech debt:</p>
+                <p>AI adds +2 power but creates tech debt:</p>
                 <div className="grid grid-cols-3 gap-1 bg-gray-900/50 p-2 rounded">
                   <span className="text-gray-400">Level</span>
-                  <span className="text-gray-400">Boost</span>
+                  <span className="text-gray-400">Power</span>
                   <span className="text-gray-400">Debt</span>
                   <span>Intern</span>
-                  <span className="text-green-400">+100%</span>
+                  <span className="text-green-400">+2</span>
                   <span className="text-red-400">+4</span>
                   <span>Junior</span>
-                  <span className="text-green-400">+100%</span>
+                  <span className="text-green-400">+2</span>
                   <span className="text-red-400">+3</span>
                   <span>Senior</span>
-                  <span className="text-green-400">+50%</span>
+                  <span className="text-green-400">+2</span>
                   <span className="text-red-400">+1</span>
                 </div>
                 {currentPlayer.strategy?.tech === 'ai-first' && (
@@ -690,12 +690,12 @@ export function PlanningPhase() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-gray-500">Without AI:</span>
-                    <span className="text-white ml-2">{Math.round(engineer.productivity * 100)}% output</span>
+                    <span className="text-white ml-2">{engineer.power} power</span>
                   </div>
                   <div>
                     <span className="text-gray-500">With AI:</span>
                     <span className="text-green-400 ml-2">
-                      {Math.round(engineer.productivity * (engineer.level === 'senior' ? 150 : 200))}% output
+                      {engineer.power + 2} power
                     </span>
                   </div>
                 </div>
@@ -734,7 +734,7 @@ export function PlanningPhase() {
                 <div className="text-2xl mb-2">AI Robot</div>
                 <div className="font-semibold text-white">Use AI</div>
                 <div className="text-xs text-green-400 mt-1">
-                  +50-100% output!
+                  +2 power!
                 </div>
                 <div className="text-xs text-red-400 mt-1">
                   Generates tech debt
@@ -744,7 +744,7 @@ export function PlanningPhase() {
           </div>
 
           <QuickTip>
-            Seniors with AI are most efficient (1.5x output for only 1 debt)
+            Seniors with AI are most efficient (+2 power for only 1 debt)
           </QuickTip>
         </div>
       </Modal>

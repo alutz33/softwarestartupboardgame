@@ -14,10 +14,12 @@ import type {
 } from '../types';
 import {
   TOTAL_QUARTERS,
-  AI_AUGMENTATION_TABLE,
   TECH_DEBT_LEVELS,
   MILESTONE_DEFINITIONS,
+  PRODUCTION_CONSTANTS,
+  AI_POWER_BONUS,
   getTechDebtLevel,
+  getAiDebt,
 } from '../types';
 import {
   FUNDING_OPTIONS,
@@ -25,6 +27,7 @@ import {
   PRODUCT_OPTIONS,
   getStartingResources,
   getStartingMetrics,
+  getStartingProductionTracks,
 } from '../data/corporations';
 import { generateEngineerPool, getSpecialtyBonus, generateIntern } from '../data/engineers';
 import { createEventDeck, checkMitigation } from '../data/events';
@@ -55,8 +58,8 @@ function checkMilestones(
         case 'first-10k-mau':
           achieved = player.metrics.mau >= 10000;
           break;
-        case 'first-5-rating':
-          achieved = player.metrics.rating >= 5.0;
+        case 'first-9-rating':
+          achieved = player.metrics.rating >= 9; // 5-star = rating 9+ on 1-10 scale
           break;
         case 'first-debt-free':
           // Must have had debt at some point (checked by having > 0 engineers or past round 1)
@@ -142,7 +145,8 @@ function createInitialPlayer(index: number): Player {
     color: PLAYER_COLORS[index],
     isReady: false,
     resources: { money: 0, serverCapacity: 0, aiCapacity: 0, techDebt: 0 },
-    metrics: { mau: 0, revenue: 0, rating: 3.0 },
+    metrics: { mau: 0, revenue: 0, rating: 5 }, // Integer 1-10 scale
+    productionTracks: { mauProduction: 0, revenueProduction: 0 },
     engineers: [],
     plannedActions: [],
     hasRecruiterBonus: false,
@@ -225,11 +229,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const resources = getStartingResources(funding, tech);
     const metrics = getStartingMetrics(product);
+    const productionTracks = getStartingProductionTracks(product, tech);
 
     set((state) => ({
       players: state.players.map((p) =>
         p.id === playerId
-          ? { ...p, strategy, resources, metrics }
+          ? { ...p, strategy, resources, metrics, productionTracks }
           : p
       ),
     }));
@@ -250,6 +255,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Calculate starting resources with card overrides
       const baseResources = getStartingResources(funding, tech);
       const baseMetrics = getStartingMetrics(product);
+      const productionTracks = getStartingProductionTracks(product, tech);
 
       const resources = {
         money: selectedCard.startingMoney ?? baseResources.money,
@@ -280,6 +286,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           startupCard: selectedCard,
           resources,
           metrics,
+          productionTracks,
           isReady: true,
           // Set power uses based on ability
           powerUsesRemaining: selectedCard.ability?.type === 'pivot' ? 1 : 0,
@@ -859,22 +866,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
             resources: {
               ...p.resources,
               techDebt: Math.max(0, p.resources.techDebt - (bonus.techDebtReduction || 0)),
-              money: p.resources.money + (bonus.extraRevenue || 0), // Bonus money for 3+ engineers
+              money: p.resources.money + (bonus.extraRevenue || 0),
             },
           };
         });
       }
 
-      // Resolve each player's actions
+      // Resolve each player's actions using INTEGER POWER SYSTEM
       for (let i = 0; i < updatedPlayers.length; i++) {
         const player = updatedPlayers[i];
         let newResources = { ...player.resources };
         let newMetrics = { ...player.metrics };
+        let newProduction = { ...player.productionTracks };
         let hasRecruiterBonus = player.hasRecruiterBonus;
         let ipoBonusScore = player.ipoBonusScore || 0;
 
         // Determine the last action for "night-owl" trait bonus
         const lastActionIndex = player.plannedActions.length - 1;
+
+        // Track if costs have already been paid for each action type this resolution
+        const costsPaid = new Set<string>();
 
         for (let actionIndex = 0; actionIndex < player.plannedActions.length; actionIndex++) {
           const action = player.plannedActions[actionIndex];
@@ -885,139 +896,184 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
           const actionSpace = getActionSpace(action.actionType);
 
+          // ============================================
+          // CALCULATE TOTAL POWER (integer sum)
+          // ============================================
+
           // Check for AI Skeptic trait - cannot use AI augmentation
           let useAi = action.useAiAugmentation;
           if (engineer.trait === 'ai-skeptic') {
             useAi = false;
           }
 
-          // Calculate output multiplier
-          const aiEntry = AI_AUGMENTATION_TABLE.find(
-            (a) =>
-              a.engineerLevel === engineer.level &&
-              a.hasAi === useAi
-          )!;
+          // Start with base power (integer: intern=1, junior=2, senior=4)
+          let totalPower = engineer.power;
 
+          // AI augmentation: flat +2 power
+          if (useAi) {
+            totalPower += AI_POWER_BONUS;
+          }
+
+          // Specialty bonus: flat +1 power if matching
           const specialtyBonus = getSpecialtyBonus(
             engineer.specialty,
             action.actionType
           );
+          totalPower += specialtyBonus;
 
-          // Base output multiplier
-          let outputMultiplier =
-            engineer.productivity * aiEntry.outputMultiplier * (1 + specialtyBonus);
-
-          // ENGINEER TRAITS BONUSES
-          // Equity-Hungry: +20% productivity if retained 2+ rounds
+          // ENGINEER TRAIT BONUSES (flat +1 power each)
+          // Equity-Hungry: +1 power if retained 2+ rounds
           if (engineer.trait === 'equity-hungry' && engineer.roundsRetained >= 2) {
-            outputMultiplier *= 1.2;
+            totalPower += 1;
           }
 
-          // Night-Owl: +30% on last action assigned each round
+          // Night-Owl: +1 power on last action assigned each round
           if (engineer.trait === 'night-owl' && actionIndex === lastActionIndex) {
-            outputMultiplier *= 1.3;
+            totalPower += 1;
           }
 
-          // TECH DEBT EFFICIENCY PENALTY
-          // Apply efficiency multiplier to output (except for pay-down-debt)
+          // TECH DEBT POWER PENALTY (integer: -1 per 4 debt)
           const currentDebtLevel = getTechDebtLevel(newResources.techDebt);
           if (action.actionType !== 'pay-down-debt') {
-            outputMultiplier *= currentDebtLevel.efficiencyMultiplier;
+            totalPower = Math.max(0, totalPower + currentDebtLevel.powerPenalty);
           }
 
           // Generate tech debt from AI usage
           if (useAi) {
-            // Check for ai-first strategy bonus (50% less debt)
-            const debtMultiplier = player.strategy?.tech === 'ai-first' ? 0.5 : 1;
-            newResources.techDebt += Math.ceil(aiEntry.techDebtGenerated * debtMultiplier);
+            let aiDebt = getAiDebt(engineer.level);
+            // AI-first strategy: 50% less debt (round up)
+            if (player.strategy?.tech === 'ai-first') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            newResources.techDebt += aiDebt;
           }
 
-          // Apply action effects
+          // ============================================
+          // APPLY ACTION EFFECTS (using integer power)
+          // ============================================
+
           switch (action.actionType) {
-            case 'develop-features':
-              newMetrics.mau += Math.round(
-                (actionSpace.effect.mauChange || 0) * outputMultiplier
-              );
-              // Move-fast strategy bonus
-              if (player.strategy?.tech === 'move-fast') {
-                newMetrics.mau += 200;
+            case 'develop-features': {
+              // +100 MAU per power point
+              const mauGain = (actionSpace.effect.mauChange || 100) * totalPower;
+              newMetrics.mau += mauGain;
+              // Move MAU production track +1 (once per action, not per engineer)
+              if (!costsPaid.has('develop-features-production')) {
+                newProduction.mauProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                  newProduction.mauProduction + (actionSpace.effect.mauProductionDelta || 0)
+                );
+                costsPaid.add('develop-features-production');
               }
               break;
+            }
 
             case 'optimize-code':
               newResources.techDebt = Math.max(0, newResources.techDebt - 1);
+              // +1 rating (integer)
               newMetrics.rating = Math.min(
-                5,
+                10,
                 newMetrics.rating + (actionSpace.effect.ratingChange || 0)
               );
               break;
 
             case 'pay-down-debt':
+              // Guaranteed -2 debt per engineer
               newResources.techDebt = Math.max(
                 0,
-                newResources.techDebt - Math.round(2 * outputMultiplier)
+                newResources.techDebt - 2
               );
               break;
 
             case 'upgrade-servers':
-              if (newResources.money >= 10) {
-                newResources.money -= 10;
-                newResources.serverCapacity += Math.round(5 * outputMultiplier);
+              // Pay cost once per action type
+              if (!costsPaid.has('upgrade-servers')) {
+                if (newResources.money >= 10) {
+                  newResources.money -= 10;
+                  costsPaid.add('upgrade-servers');
+                } else {
+                  break; // Can't afford
+                }
               }
+              // +5 server capacity (flat, not scaled by power for infrastructure)
+              newResources.serverCapacity += 5;
               break;
 
             case 'research-ai':
-              if (newResources.money >= 15) {
-                newResources.money -= 15;
-                newResources.aiCapacity += Math.round(2 * outputMultiplier);
+              // Pay cost once per action type
+              if (!costsPaid.has('research-ai')) {
+                if (newResources.money >= 15) {
+                  newResources.money -= 15;
+                  costsPaid.add('research-ai');
+                } else {
+                  break; // Can't afford
+                }
               }
+              // +2 AI capacity (flat)
+              newResources.aiCapacity += 2;
               break;
 
             case 'marketing': {
-              // Check for marketing-discount ability (50% off)
+              // Pay cost once per action type
               const marketingCost = hasAbility(player, 'marketing-discount') ? 10 : 20;
-              if (newResources.money >= marketingCost) {
-                newResources.money -= marketingCost;
-                let mauGain = Math.round(
-                  (actionSpace.effect.mauChange || 0) * outputMultiplier
-                );
-                // VC-Heavy bonus
-                if (player.strategy?.funding === 'vc-heavy') {
-                  mauGain = Math.round(mauGain * 1.5);
+              if (!costsPaid.has('marketing')) {
+                if (newResources.money >= marketingCost) {
+                  newResources.money -= marketingCost;
+                  costsPaid.add('marketing');
+                } else {
+                  break; // Can't afford
                 }
-                // Scale with rating
-                mauGain = Math.round(mauGain * (newMetrics.rating / 3));
-                newMetrics.mau += mauGain;
-                newMetrics.rating = Math.min(
-                  5,
-                  newMetrics.rating + (actionSpace.effect.ratingChange || 0)
-                );
               }
-              break;
-            }
-
-            case 'monetization': {
-              let revenue = Math.round(
-                (actionSpace.effect.revenueChange || 0) * outputMultiplier
-              );
-              // Scale with MAU
-              revenue = Math.round(revenue * (newMetrics.mau / 1000));
-              // Apply revenue-boost ability (+20%)
-              if (hasAbility(player, 'revenue-boost')) {
-                revenue = Math.round(revenue * 1.2);
+              // +200 MAU per power, scaled by rating
+              let mauGain = (actionSpace.effect.mauChange || 200) * totalPower;
+              // VC-Heavy funding: +2 power bonus for marketing
+              if (player.strategy?.funding === 'vc-heavy') {
+                mauGain += (actionSpace.effect.mauChange || 200) * 2;
               }
-              newMetrics.revenue += revenue;
-              newMetrics.rating = Math.max(
-                1,
+              // Scale with rating (rating/5 as a simple integer-friendly scaling)
+              mauGain = Math.round(mauGain * newMetrics.rating / 5);
+              newMetrics.mau += mauGain;
+              // +1 rating from marketing
+              newMetrics.rating = Math.min(
+                10,
                 newMetrics.rating + (actionSpace.effect.ratingChange || 0)
               );
               break;
             }
 
+            case 'monetization': {
+              // Revenue scales with MAU and power
+              let revenue = Math.round(
+                (actionSpace.effect.revenueChange || 300) * totalPower * (newMetrics.mau / 1000)
+              );
+              // Apply revenue-boost ability (+20%)
+              if (hasAbility(player, 'revenue-boost')) {
+                revenue = Math.round(revenue * 1.2);
+              }
+              newMetrics.revenue += revenue;
+              // -1 rating from monetization (integer)
+              newMetrics.rating = Math.max(
+                1,
+                newMetrics.rating + (actionSpace.effect.ratingChange || 0)
+              );
+              // Move revenue production track +1
+              if (!costsPaid.has('monetization-production')) {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                  newProduction.revenueProduction + (actionSpace.effect.revenueProductionDelta || 0)
+                );
+                costsPaid.add('monetization-production');
+              }
+              break;
+            }
+
             case 'hire-recruiter':
-              if (newResources.money >= 25) {
-                newResources.money -= 25;
-                hasRecruiterBonus = true;
+              if (!costsPaid.has('hire-recruiter')) {
+                if (newResources.money >= 25) {
+                  newResources.money -= 25;
+                  hasRecruiterBonus = true;
+                  costsPaid.add('hire-recruiter');
+                }
               }
               break;
 
@@ -1025,16 +1081,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // LATE-GAME ACTIONS (Round 3-4)
             // ============================================
             case 'go-viral':
-              if (newResources.money >= 15 && state.currentRound >= 3) {
+              if (!costsPaid.has('go-viral') && newResources.money >= 15 && state.currentRound >= 3) {
                 newResources.money -= 15;
+                costsPaid.add('go-viral');
                 // 50% chance of success
                 if (Math.random() < 0.5) {
-                  // Apply viral-boost ability (+50% MAU gain)
                   let viralGain = 3000;
                   if (hasAbility(player, 'viral-boost')) {
-                    viralGain = Math.round(viralGain * 1.5); // 4500 MAU
+                    viralGain = Math.round(viralGain * 1.5);
                   }
                   newMetrics.mau += viralGain;
+                  // +2 MAU production on success
+                  newProduction.mauProduction = Math.min(
+                    PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                    newProduction.mauProduction + (actionSpace.effect.mauProductionDelta || 0)
+                  );
                 } else {
                   newMetrics.mau = Math.max(0, newMetrics.mau - 1000);
                 }
@@ -1042,33 +1103,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
               break;
 
             case 'ipo-prep':
-              if (newResources.money >= 50 && state.currentRound >= 4) {
+              if (!costsPaid.has('ipo-prep') && newResources.money >= 50 && state.currentRound >= 4) {
                 newResources.money -= 50;
-                // Store IPO bonus score for final calculation
-                // We need to track this per player
                 ipoBonusScore = 25;
+                costsPaid.add('ipo-prep');
               }
               break;
 
             case 'acquisition-target':
-              if (state.currentRound >= 4) {
-                // Convert MAU to instant score: MAU × 0.002
-                // Lose 50% MAU
+              if (!costsPaid.has('acquisition-target') && state.currentRound >= 4) {
                 const acquisitionScore = Math.round(newMetrics.mau * 0.002);
                 ipoBonusScore += acquisitionScore;
                 newMetrics.mau = Math.round(newMetrics.mau * 0.5);
+                costsPaid.add('acquisition-target');
               }
               break;
           }
         }
 
-        // Apply tech debt penalties (using new system)
+        // Apply tech debt production penalties
         const finalDebtLevel = getTechDebtLevel(newResources.techDebt);
-        if (finalDebtLevel.ratingPenalty > 0) {
-          newMetrics.rating = Math.max(
-            1,
-            newMetrics.rating - finalDebtLevel.ratingPenalty
-          );
+        if (finalDebtLevel.ratingPenalty !== 0) {
+          newMetrics.rating = Math.max(1, Math.min(10,
+            newMetrics.rating + finalDebtLevel.ratingPenalty
+          ));
         }
 
         // Apply passive-income ability (+$5 per quarter)
@@ -1076,32 +1134,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
           newResources.money += 5;
         }
 
-        // Quality-focused strategy bonus
+        // Quality-focused strategy bonus: +1 rating at end of each round
         if (player.strategy?.tech === 'quality-focused') {
-          newMetrics.rating = Math.min(5, newMetrics.rating + 0.1);
+          newMetrics.rating = Math.min(10, newMetrics.rating + 1);
         }
 
-        // Apply product type multipliers to final values
-        const product = PRODUCT_OPTIONS.find(
-          (p) => p.id === player.strategy?.product
-        );
-        if (product) {
-          // These are applied as growth multipliers
-          const mauGrowth = newMetrics.mau - player.metrics.mau;
-          const revenueGrowth = newMetrics.revenue - player.metrics.revenue;
-          newMetrics.mau =
-            player.metrics.mau + Math.round(mauGrowth * product.mauMultiplier);
-          newMetrics.revenue =
-            player.metrics.revenue +
-            Math.round(revenueGrowth * product.revenueMultiplier);
-        }
+        // Clamp production tracks to valid ranges
+        newProduction.mauProduction = Math.max(0, Math.min(
+          PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction
+        ));
+        newProduction.revenueProduction = Math.max(0, Math.min(
+          PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction
+        ));
+
+        // Clamp rating to 1-10 integer
+        newMetrics.rating = Math.max(1, Math.min(10, Math.round(newMetrics.rating)));
 
         // Income from MAU with catch-up mechanics
-        // Base income calculation
         const rawIncome = Math.round(newMetrics.mau / 100);
-
-        // Income cap that grows each round (prevents runaway leader)
-        const incomeCap = 30 + (state.currentRound * 10); // Round 1: 40, Round 2: 50, etc.
+        const incomeCap = 30 + (state.currentRound * 10);
         const cappedIncome = Math.min(rawIncome, incomeCap);
 
         // Underdog bonus: players below median MAU get a stipend
@@ -1116,15 +1167,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ...player,
           resources: newResources,
           metrics: newMetrics,
+          productionTracks: newProduction,
           hasRecruiterBonus,
           isReady: false,
           plannedActions: [],
-          ipoBonusScore, // Track IPO/Acquisition bonus for final scoring
+          ipoBonusScore,
           engineers: player.engineers.map((e) => ({
             ...e,
             assignedAction: undefined,
             hasAiAugmentation: false,
-            roundsRetained: e.roundsRetained + 1, // Increment for equity-hungry trait
+            roundsRetained: e.roundsRetained + 1,
           })),
         };
       }
@@ -1204,13 +1256,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
           };
         }
 
-        // Apply metric changes
+        // Apply metric changes (integer rating, 1-10 scale)
         newMetrics = {
           mau: Math.max(0, newMetrics.mau + (effect.mauChange || 0)),
           revenue: Math.max(0, newMetrics.revenue + (effect.revenueChange || 0)),
           rating: Math.max(
             1,
-            Math.min(5, newMetrics.rating + (effect.ratingChange || 0))
+            Math.min(10, newMetrics.rating + (effect.ratingChange || 0))
           ),
         };
 
@@ -1222,7 +1274,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ) {
           const overflow = newMetrics.mau - player.resources.serverCapacity * 100;
           newMetrics.mau -= Math.round(overflow / 2);
-          newMetrics.rating = Math.max(1, newMetrics.rating - 0.5);
+          newMetrics.rating = Math.max(1, newMetrics.rating - 2); // -2 rating for crash
         }
 
         return {
@@ -1267,20 +1319,40 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const eventDeck = [...state.eventDeck];
     const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
 
-    // Reset recruiter bonus
-    const players = state.players.map((p) => ({
-      ...p,
-      hasRecruiterBonus: false,
-    }));
+    // MARS-STYLE PRODUCTION: Produce resources based on production track positions
+    // This happens at the start of each new round (before the draft)
+    const playersAfterProduction = state.players.map((p) => {
+      const debtLevel = getTechDebtLevel(p.resources.techDebt);
+
+      // Effective production = marker position + debt penalties
+      const effectiveMauProd = Math.max(0, p.productionTracks.mauProduction + debtLevel.mauProductionPenalty);
+      const effectiveRevProd = Math.max(0, p.productionTracks.revenueProduction + debtLevel.revenueProductionPenalty);
+
+      const mauGain = effectiveMauProd * PRODUCTION_CONSTANTS.MAU_PER_PRODUCTION;
+      const moneyGain = effectiveRevProd * PRODUCTION_CONSTANTS.MONEY_PER_PRODUCTION;
+
+      return {
+        ...p,
+        metrics: {
+          ...p.metrics,
+          mau: p.metrics.mau + mauGain,
+        },
+        resources: {
+          ...p.resources,
+          money: p.resources.money + moneyGain,
+        },
+        hasRecruiterBonus: false, // Reset recruiter bonus
+      };
+    });
 
     // CATCH-UP MECHANIC: Sort players by MAU for draft order
     // Lowest MAU picks first (advantage to trailing players)
-    const draftOrder = [...players]
+    const draftOrder = [...playersAfterProduction]
       .sort((a, b) => a.metrics.mau - b.metrics.mau)
       .map(p => p.id);
 
     set({
-      players,
+      players: playersAfterProduction,
       currentRound: nextRound,
       currentQuarter: nextRound,
       phase: 'engineer-draft',
@@ -1315,8 +1387,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
       score += (player.metrics.revenue / 500) * revenueMultiplier;
 
-      // Rating score (10 points per rating point)
-      score += player.metrics.rating * 10;
+      // Rating score (5 points per rating point on 1-10 scale, max 50)
+      score += player.metrics.rating * 5;
 
       // MILESTONE BONUSES - Add points for claimed milestones
       for (const milestone of state.milestones) {

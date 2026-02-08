@@ -53,8 +53,8 @@ export function RoundEnd() {
 
   // Sort players by estimated score
   const sortedPlayers = [...players].sort((a, b) => {
-    const scoreA = a.metrics.mau / 1000 + a.metrics.revenue / 500 + a.metrics.rating * 10;
-    const scoreB = b.metrics.mau / 1000 + b.metrics.revenue / 500 + b.metrics.rating * 10;
+    const scoreA = a.metrics.mau / 1000 + a.metrics.revenue / 500 + a.metrics.rating * 5;
+    const scoreB = b.metrics.mau / 1000 + b.metrics.revenue / 500 + b.metrics.rating * 5;
     return scoreB - scoreA;
   });
 

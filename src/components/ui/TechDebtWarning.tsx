@@ -11,13 +11,13 @@ export function TechDebtWarning({ techDebt, showDetails = false }: TechDebtWarni
 
   const getLevelInfo = () => {
     if (techDebt <= 3) return { label: 'SAFE', color: 'green', emoji: 'SAFE' };
-    if (techDebt <= 6) return { label: 'WARNING', color: 'yellow', emoji: 'WARNING' };
-    if (techDebt <= 9) return { label: 'DANGER', color: 'orange', emoji: 'DANGER' };
+    if (techDebt <= 7) return { label: 'WARNING', color: 'yellow', emoji: 'WARNING' };
+    if (techDebt <= 11) return { label: 'DANGER', color: 'orange', emoji: 'DANGER' };
     return { label: 'CRITICAL', color: 'red', emoji: 'CRITICAL' };
   };
 
   const levelInfo = getLevelInfo();
-  const efficiency = Math.round(currentLevel.efficiencyMultiplier * 100);
+  const powerPenalty = currentLevel.powerPenalty;
 
   const colorClasses: Record<string, { bg: string; border: string; text: string }> = {
     green: { bg: 'bg-green-500/20', border: 'border-green-500/50', text: 'text-green-400' },
@@ -48,7 +48,7 @@ export function TechDebtWarning({ techDebt, showDetails = false }: TechDebtWarni
       <div className="h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
         <motion.div
           initial={{ width: 0 }}
-          animate={{ width: `${Math.min(techDebt * 10, 100)}%` }}
+          animate={{ width: `${Math.min(techDebt * 7, 100)}%` }}
           className={`h-full ${
             levelInfo.color === 'green' ? 'bg-green-500' :
             levelInfo.color === 'yellow' ? 'bg-yellow-500' :
@@ -62,23 +62,33 @@ export function TechDebtWarning({ techDebt, showDetails = false }: TechDebtWarni
       <div className="flex justify-between text-[10px] text-gray-500 mb-2">
         <span>0</span>
         <span className="text-yellow-500">4</span>
-        <span className="text-orange-500">7</span>
-        <span className="text-red-500">10+</span>
+        <span className="text-orange-500">8</span>
+        <span className="text-red-500">12+</span>
       </div>
 
       {/* Current penalties */}
-      {(efficiency < 100 || currentLevel.ratingPenalty > 0 || currentLevel.blocksDevelopment) && (
+      {(powerPenalty < 0 || currentLevel.ratingPenalty !== 0 || currentLevel.blocksDevelopment) && (
         <div className="bg-gray-900/50 rounded p-2 text-xs">
           <div className="text-gray-400 font-medium mb-1">Current Penalties:</div>
           <ul className="space-y-1">
-            {efficiency < 100 && (
+            {powerPenalty < 0 && (
               <li className="text-yellow-400">
-                • Efficiency reduced to <span className="font-bold">{efficiency}%</span> on all actions
+                • All engineers: <span className="font-bold">{powerPenalty} power</span>
               </li>
             )}
-            {currentLevel.ratingPenalty > 0 && (
+            {currentLevel.mauProductionPenalty < 0 && (
+              <li className="text-orange-400">
+                • MAU production: {currentLevel.mauProductionPenalty} per round
+              </li>
+            )}
+            {currentLevel.revenueProductionPenalty < 0 && (
+              <li className="text-orange-400">
+                • Revenue production: {currentLevel.revenueProductionPenalty} per round
+              </li>
+            )}
+            {currentLevel.ratingPenalty !== 0 && (
               <li className="text-red-400">
-                • Rating penalty: -{currentLevel.ratingPenalty} per quarter
+                • Rating penalty: {currentLevel.ratingPenalty} per quarter
               </li>
             )}
             {currentLevel.blocksDevelopment && (
@@ -94,23 +104,23 @@ export function TechDebtWarning({ techDebt, showDetails = false }: TechDebtWarni
         <div className="mt-2 pt-2 border-t border-gray-700">
           <div className="text-xs text-gray-500">Debt Level Thresholds:</div>
           <div className="grid grid-cols-2 gap-1 mt-1 text-[10px]">
-            <div className="text-green-400">0-3: 100% efficiency</div>
-            <div className="text-yellow-400">4-6: 85% efficiency</div>
-            <div className="text-orange-400">7-9: 70% efficiency</div>
-            <div className="text-red-400">10+: 50% + BLOCKED</div>
+            <div className="text-green-400">0-3: No penalty</div>
+            <div className="text-yellow-400">4-7: -1 power, -1 MAU prod</div>
+            <div className="text-orange-400">8-11: -2 power, -1 each prod</div>
+            <div className="text-red-400">12+: -3 power + BLOCKED</div>
           </div>
         </div>
       )}
 
       {/* Next threshold warning */}
-      {techDebt < 10 && (
+      {techDebt < 12 && (
         <div className="mt-2 text-[10px] text-gray-500">
           {techDebt < 4 ? (
-            <span>Next threshold at 4 debt (85% efficiency, -0.2 rating)</span>
-          ) : techDebt < 7 ? (
-            <span>Next threshold at 7 debt (70% efficiency, -0.3 rating)</span>
+            <span>Next threshold at 4 debt (-1 power, -1 MAU production)</span>
+          ) : techDebt < 8 ? (
+            <span>Next threshold at 8 debt (-2 power, -1 each production)</span>
           ) : (
-            <span className="text-red-400">CRITICAL threshold at 10 debt (50% efficiency, actions BLOCKED!)</span>
+            <span className="text-red-400">CRITICAL threshold at 12 debt (-3 power, actions BLOCKED!)</span>
           )}
         </div>
       )}
@@ -132,12 +142,11 @@ interface MiniDebtIndicatorProps {
 
 export function MiniDebtIndicator({ techDebt, showEfficiency = false }: MiniDebtIndicatorProps) {
   const debtLevel = getTechDebtLevel(techDebt);
-  const efficiency = Math.round(debtLevel.efficiencyMultiplier * 100);
 
   const getColor = () => {
     if (techDebt <= 3) return 'text-green-400 bg-green-500/20';
-    if (techDebt <= 6) return 'text-yellow-400 bg-yellow-500/20';
-    if (techDebt <= 9) return 'text-orange-400 bg-orange-500/20';
+    if (techDebt <= 7) return 'text-yellow-400 bg-yellow-500/20';
+    if (techDebt <= 11) return 'text-orange-400 bg-orange-500/20';
     return 'text-red-400 bg-red-500/20';
   };
 
@@ -146,9 +155,9 @@ export function MiniDebtIndicator({ techDebt, showEfficiency = false }: MiniDebt
       <span className={`text-xs px-2 py-0.5 rounded ${getColor()}`}>
         Debt: {techDebt}
       </span>
-      {showEfficiency && efficiency < 100 && (
+      {showEfficiency && debtLevel.powerPenalty < 0 && (
         <span className="text-[10px] text-yellow-400 mt-0.5">
-          {efficiency}% efficiency
+          {debtLevel.powerPenalty} power
         </span>
       )}
       {debtLevel.blocksDevelopment && (

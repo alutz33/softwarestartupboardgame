@@ -19,6 +19,24 @@ export interface Resources {
 }
 
 // ============================================
+// PRODUCTION TRACKS (Mars-style)
+// ============================================
+// Each player has production markers that slide along tracks.
+// At the start of each round, players produce resources equal to their marker positions.
+
+export interface ProductionTracks {
+  mauProduction: number;       // 0-20: produces N × 200 MAU per round
+  revenueProduction: number;   // 0-15: produces N × $5 income per round
+}
+
+export const PRODUCTION_CONSTANTS = {
+  MAU_PER_PRODUCTION: 200,      // Each point of MAU production = +200 MAU
+  MONEY_PER_PRODUCTION: 5,      // Each point of revenue production = +$5
+  MAX_MAU_PRODUCTION: 20,
+  MAX_REVENUE_PRODUCTION: 15,
+} as const;
+
+// ============================================
 // CORPORATION / STRATEGY SELECTION
 // ============================================
 
@@ -122,10 +140,10 @@ export type EngineerLevel = 'junior' | 'senior' | 'intern';
 // ============================================
 
 export type EngineerTraitType =
-  | 'ai-skeptic'      // Cannot use AI augmentation, +10% base productivity
-  | 'equity-hungry'   // Costs +$5, +20% productivity if retained 2+ rounds
+  | 'ai-skeptic'      // Cannot use AI augmentation, +1 base power
+  | 'equity-hungry'   // Costs +$5, +1 power if retained 2+ rounds
   | 'startup-veteran' // Immune to event penalties
-  | 'night-owl';      // +30% on last action assigned each round
+  | 'night-owl';      // +1 power on last action assigned each round
 
 export interface EngineerTrait {
   id: EngineerTraitType;
@@ -137,12 +155,12 @@ export const ENGINEER_TRAITS: Record<EngineerTraitType, EngineerTrait> = {
   'ai-skeptic': {
     id: 'ai-skeptic',
     name: 'AI Skeptic',
-    description: 'Cannot use AI augmentation, but +10% base productivity',
+    description: 'Cannot use AI augmentation, but +1 base power',
   },
   'equity-hungry': {
     id: 'equity-hungry',
     name: 'Equity-Hungry',
-    description: 'Costs +$5 salary, +20% productivity if retained 2+ rounds',
+    description: 'Costs +$5 salary, +1 power if retained 2+ rounds',
   },
   'startup-veteran': {
     id: 'startup-veteran',
@@ -152,7 +170,7 @@ export const ENGINEER_TRAITS: Record<EngineerTraitType, EngineerTrait> = {
   'night-owl': {
     id: 'night-owl',
     name: 'Night Owl',
-    description: '+30% on last action assigned each round',
+    description: '+1 power on last action assigned each round',
   },
 };
 
@@ -162,7 +180,7 @@ export interface Engineer {
   level: EngineerLevel;
   specialty?: 'frontend' | 'backend' | 'fullstack' | 'devops' | 'ai';
   baseSalary: number;
-  productivity: number; // output multiplier
+  power: number; // integer power: intern=1, junior=2, senior=4
   trait?: EngineerTraitType; // Optional unique trait
 }
 
@@ -205,8 +223,11 @@ export interface ActionSpace {
 export interface ActionEffect {
   mauChange?: number;
   revenueChange?: number;
-  ratingChange?: number;
+  ratingChange?: number;           // Integer: +1, -1, +2, -2
   resourceChanges?: Partial<Resources>;
+  // Production track deltas (Mars-style)
+  mauProductionDelta?: number;     // How much to move MAU production marker
+  revenueProductionDelta?: number; // How much to move Revenue production marker
   triggersMinigame?: boolean;
   special?: string;
 }
@@ -329,7 +350,7 @@ export interface PuzzleBonus {
 export interface PlayerMetrics {
   mau: number;
   revenue: number;
-  rating: number; // 1-5 scale
+  rating: number; // 1-10 integer scale (no decimals)
 }
 
 export interface Player {
@@ -341,6 +362,7 @@ export interface Player {
   startupCard?: StartupCard; // The startup card this player selected
   resources: Resources;
   metrics: PlayerMetrics;
+  productionTracks: ProductionTracks; // Mars-style production markers
   engineers: HiredEngineer[];
   plannedActions: PlannedAction[];
   hasRecruiterBonus: boolean;
@@ -403,7 +425,7 @@ export interface Milestone {
 // Milestone definitions (conditions checked in gameStore)
 export const MILESTONE_DEFINITIONS = [
   { id: 'first-5k-mau', name: 'First to 5K Users', description: 'First player to reach 5,000 MAU', bonus: 10 },
-  { id: 'first-5-rating', name: 'Five Star Startup', description: 'First player to achieve 5.0 rating', bonus: 15 },
+  { id: 'first-9-rating', name: 'Five Star Startup', description: 'First player to achieve 9+ rating (5 stars)', bonus: 15 },
   { id: 'first-debt-free', name: 'Clean Code Club', description: 'First player to have 0 tech debt (after having debt)', bonus: 10 },
   { id: 'first-10k-mau', name: 'Growth Hacker', description: 'First player to reach 10,000 MAU', bonus: 15 },
   { id: 'revenue-leader', name: 'Revenue King', description: 'First player to reach $1,000 revenue', bonus: 12 },
@@ -470,26 +492,24 @@ export interface Notification {
 }
 
 // ============================================
-// TECH DEBT EFFECTS
+// TECH DEBT EFFECTS (Integer-based)
 // ============================================
 
 export interface TechDebtLevel {
   min: number;
   max: number;
-  efficiencyMultiplier: number;  // 0.3 to 1.0 - applied to ALL action outputs
-  ratingPenalty: number;
-  blocksDevelopment: boolean;    // blocks develop-features and optimize-code
-  // Legacy fields kept for reference
-  featureBreakChance: number;
-  forcedDebtPayment: number;
+  powerPenalty: number;             // Flat power reduction for ALL engineers (-1 per 4 debt)
+  mauProductionPenalty: number;     // Penalty to MAU production track
+  revenueProductionPenalty: number; // Penalty to Revenue production track
+  ratingPenalty: number;            // Integer penalty to rating
+  blocksDevelopment: boolean;       // Blocks develop-features and optimize-code
 }
 
 export const TECH_DEBT_LEVELS: TechDebtLevel[] = [
-  { min: 0, max: 3, efficiencyMultiplier: 1.0, ratingPenalty: 0, blocksDevelopment: false, featureBreakChance: 0, forcedDebtPayment: 0 },
-  { min: 4, max: 6, efficiencyMultiplier: 0.85, ratingPenalty: 0.2, blocksDevelopment: false, featureBreakChance: 0, forcedDebtPayment: 0 },
-  { min: 7, max: 9, efficiencyMultiplier: 0.70, ratingPenalty: 0.3, blocksDevelopment: false, featureBreakChance: 0.2, forcedDebtPayment: 0 },
-  { min: 10, max: 12, efficiencyMultiplier: 0.50, ratingPenalty: 0.5, blocksDevelopment: true, featureBreakChance: 0.4, forcedDebtPayment: 0.5 },
-  { min: 13, max: Infinity, efficiencyMultiplier: 0.30, ratingPenalty: 0.5, blocksDevelopment: true, featureBreakChance: 0.6, forcedDebtPayment: 0.75 },
+  { min: 0, max: 3, powerPenalty: 0, mauProductionPenalty: 0, revenueProductionPenalty: 0, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 4, max: 7, powerPenalty: -1, mauProductionPenalty: -1, revenueProductionPenalty: 0, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 8, max: 11, powerPenalty: -2, mauProductionPenalty: -1, revenueProductionPenalty: -1, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 12, max: Infinity, powerPenalty: -3, mauProductionPenalty: -2, revenueProductionPenalty: -1, ratingPenalty: -1, blocksDevelopment: true },
 ];
 
 // Helper function to get current tech debt level
@@ -498,21 +518,24 @@ export function getTechDebtLevel(techDebt: number): TechDebtLevel {
 }
 
 // ============================================
-// AI AUGMENTATION TABLE
+// AI AUGMENTATION (Integer Power System)
 // ============================================
+// AI augmentation adds +2 power (flat) but generates tech debt.
+// Debt generated depends on engineer level (seniors are more careful with AI).
 
-export interface AiAugmentationResult {
+export const AI_POWER_BONUS = 2; // Flat +2 power from AI augmentation
+
+export interface AiDebtByLevel {
   engineerLevel: EngineerLevel;
-  hasAi: boolean;
-  outputMultiplier: number;
   techDebtGenerated: number;
 }
 
-export const AI_AUGMENTATION_TABLE: AiAugmentationResult[] = [
-  { engineerLevel: 'intern', hasAi: false, outputMultiplier: 0.3, techDebtGenerated: 1 },
-  { engineerLevel: 'intern', hasAi: true, outputMultiplier: 0.6, techDebtGenerated: 4 },
-  { engineerLevel: 'junior', hasAi: false, outputMultiplier: 0.5, techDebtGenerated: 1 },
-  { engineerLevel: 'senior', hasAi: false, outputMultiplier: 1.0, techDebtGenerated: 0 },
-  { engineerLevel: 'junior', hasAi: true, outputMultiplier: 1.0, techDebtGenerated: 3 },
-  { engineerLevel: 'senior', hasAi: true, outputMultiplier: 1.5, techDebtGenerated: 1 },
+export const AI_DEBT_TABLE: AiDebtByLevel[] = [
+  { engineerLevel: 'intern', techDebtGenerated: 4 },
+  { engineerLevel: 'junior', techDebtGenerated: 3 },
+  { engineerLevel: 'senior', techDebtGenerated: 1 },
 ];
+
+export function getAiDebt(level: EngineerLevel): number {
+  return AI_DEBT_TABLE.find(e => e.engineerLevel === level)?.techDebtGenerated ?? 2;
+}

@@ -128,7 +128,7 @@ export function EventPhase() {
                         }
                       >
                         Rating: {effect.ratingChange > 0 ? '+' : ''}
-                        {effect.ratingChange.toFixed(1)}
+                        {effect.ratingChange}
                       </div>
                     )}
                     {effect.resourceChanges?.techDebt && (

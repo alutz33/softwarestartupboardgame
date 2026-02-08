@@ -135,7 +135,7 @@ export function GameEnd() {
                         <div>
                           <div className="text-xs text-gray-500">Rating</div>
                           <div className="text-lg font-bold text-yellow-400">
-                            {player.metrics.rating.toFixed(1)}
+                            {player.metrics.rating}/10
                           </div>
                         </div>
                       </div>

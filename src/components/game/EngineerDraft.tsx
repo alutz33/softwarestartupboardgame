@@ -39,11 +39,11 @@ function EngineerCard({
   };
 
   const specialtyBonuses: Record<string, string> = {
-    frontend: '+20% Develop Features, +10% Marketing',
-    backend: '+20% Optimize Code, +10% Servers',
-    fullstack: '+10% Features & Optimize',
-    devops: '+30% Servers, +10% AI Research',
-    ai: '+30% AI Research, +10% Optimize',
+    frontend: '+1 power: Develop Features, Marketing',
+    backend: '+1 power: Optimize Code, Servers',
+    fullstack: '+1 power: Features & Optimize',
+    devops: '+1 power: Servers, AI Research',
+    ai: '+1 power: AI Research, Optimize',
   };
 
   return (
@@ -97,20 +97,20 @@ function EngineerCard({
           )}
 
           <div className="flex justify-between items-center text-sm mb-3">
-            <span className="text-gray-400">Productivity</span>
+            <span className="text-gray-400">Power</span>
             <div className="flex items-center gap-1">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div
                   key={i}
                   className={`w-3 h-3 rounded-sm ${
-                    i < Math.round(Math.min(engineer.productivity, 1) * 5)
+                    i < engineer.power
                       ? 'bg-blue-500'
                       : 'bg-gray-700'
                   }`}
                 />
               ))}
               <span className="ml-2 text-gray-300">
-                {Math.min(Math.round(engineer.productivity * 100), 100)}%
+                {engineer.power}
               </span>
             </div>
           </div>
@@ -130,13 +130,13 @@ function EngineerCard({
           {/* AI efficiency hint */}
           <div className="text-xs text-gray-500 mb-3 bg-gray-800/50 p-2 rounded">
             {engineer.trait === 'ai-skeptic' ? (
-              <span className="text-orange-400">Cannot use AI (+10% base productivity instead)</span>
+              <span className="text-orange-400">Cannot use AI (+1 base power instead)</span>
             ) : engineer.level === 'senior' ? (
-              <span className="text-green-400">Best with AI: 1.5x output, only +1 debt</span>
+              <span className="text-green-400">Best with AI: +2 power, only +1 debt</span>
             ) : engineer.level === 'junior' ? (
-              <span className="text-yellow-400">OK with AI: 2x output, but +3 debt</span>
+              <span className="text-yellow-400">OK with AI: +2 power, but +3 debt</span>
             ) : (
-              <span className="text-orange-400">Risky with AI: 2x output, but +4 debt!</span>
+              <span className="text-orange-400">Risky with AI: +2 power, but +4 debt!</span>
             )}
           </div>
 
@@ -170,8 +170,8 @@ function EngineerCard({
               <span className="text-white capitalize">{engineer.level}</span>
             </div>
             <div className="flex justify-between mb-1">
-              <span className="text-gray-400">Productivity:</span>
-              <span className="text-white">{Math.round(engineer.productivity * 100)}%</span>
+              <span className="text-gray-400">Power:</span>
+              <span className="text-white">{engineer.power}</span>
             </div>
             {engineer.specialty && (
               <div className="flex justify-between">
@@ -306,18 +306,18 @@ export function EngineerDraft() {
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between items-center">
                   <Badge variant="success" size="sm">Senior</Badge>
-                  <span className="text-gray-300">100% productivity, $25-35</span>
+                  <span className="text-gray-300">4 power, $25-35</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <Badge variant="default" size="sm">Junior</Badge>
-                  <span className="text-gray-300">50% productivity, $10-20</span>
+                  <span className="text-gray-300">2 power, $10-20</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <Badge variant="warning" size="sm">Intern</Badge>
-                  <span className="text-gray-300">30% productivity, $5-10</span>
+                  <span className="text-gray-300">1 power, $5-10</span>
                 </div>
                 <p className="text-gray-500 mt-2">
-                  Seniors are most efficient with AI augmentation!
+                  AI adds +2 power. Specialty match adds +1 power.
                 </p>
               </div>
             </HelpCard>

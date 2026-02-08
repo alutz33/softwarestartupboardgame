@@ -1,4 +1,4 @@
-import type { FundingOption, TechOption, ProductOption, CorporationPower } from '../types';
+import type { FundingOption, TechOption, ProductOption, CorporationPower, ProductionTracks } from '../types';
 
 // ============================================
 // CORPORATION POWERS (Unique Abilities)
@@ -35,7 +35,7 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     description: 'Raised a big Series A. Lots of cash, but investors want growth.',
     startingMoney: 100,
     equityRetained: 40,
-    bonusEffect: '+50% marketing effectiveness, but must hit MAU targets',
+    bonusEffect: '+2 Marketing power. Can pivot once/game. 40% equity.',
     power: CORPORATION_POWERS.pivot,
   },
   {
@@ -44,7 +44,7 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     description: 'Self-funded. Limited cash, but you own everything.',
     startingMoney: 40,
     equityRetained: 100,
-    bonusEffect: 'Revenue counts 2x for scoring, but slower start',
+    bonusEffect: 'Revenue scores 2x at end. -20% hiring costs. 100% equity.',
     power: CORPORATION_POWERS['lean-team'],
   },
   {
@@ -53,7 +53,7 @@ export const FUNDING_OPTIONS: FundingOption[] = [
     description: 'Strategic angels provide moderate funding and connections.',
     startingMoney: 70,
     equityRetained: 70,
-    bonusEffect: '+1 engineer capacity per round, flexible strategy',
+    bonusEffect: '+1 engineer capacity. See +2 extra engineers in draft. 70% equity.',
     power: CORPORATION_POWERS['insider-info'],
   },
 ];
@@ -65,7 +65,7 @@ export const TECH_OPTIONS: TechOption[] = [
     description: 'Built on AI from day one. Fast output, but dependency risks.',
     startingAiCapacity: 4,
     startingTechDebt: 2,
-    bonusEffect: 'AI augmentation costs 50% less debt',
+    bonusEffect: 'AI augmentation generates 50% less debt',
   },
   {
     id: 'quality-focused',
@@ -73,7 +73,7 @@ export const TECH_OPTIONS: TechOption[] = [
     description: 'Clean code, thorough testing. Slower but stable.',
     startingAiCapacity: 1,
     startingTechDebt: 0,
-    bonusEffect: 'Tech debt accumulates 50% slower, +0.5 base rating',
+    bonusEffect: '+1 rating at end of each round',
   },
   {
     id: 'move-fast',
@@ -81,7 +81,7 @@ export const TECH_OPTIONS: TechOption[] = [
     description: 'Ship first, fix later. Rapid iteration.',
     startingAiCapacity: 2,
     startingTechDebt: 3,
-    bonusEffect: '+1 feature output per round, but debt accumulates 25% faster',
+    bonusEffect: '+1 MAU production at start, but debt accumulates faster',
   },
 ];
 
@@ -89,7 +89,7 @@ export const PRODUCT_OPTIONS: ProductOption[] = [
   {
     id: 'b2b',
     name: 'B2B SaaS',
-    description: 'Enterprise customers. Higher revenue per user, slower growth.',
+    description: 'Enterprise customers. Higher revenue, slower MAU growth.',
     mauMultiplier: 0.5,
     revenueMultiplier: 2.0,
     ratingMultiplier: 0.8,
@@ -112,6 +112,47 @@ export const PRODUCT_OPTIONS: ProductOption[] = [
   },
 ];
 
+// ============================================
+// STARTING PRODUCTION POSITIONS (by product type)
+// ============================================
+// Instead of complex multipliers, each product type gives different
+// starting positions on the production tracks.
+
+export function getStartingProductionTracks(
+  product: ProductOption,
+  tech: TechOption
+): ProductionTracks {
+  // Base production by product type
+  const baseProduction: Record<string, ProductionTracks> = {
+    b2b: { mauProduction: 1, revenueProduction: 2 },       // B2B: slow users, strong revenue
+    consumer: { mauProduction: 3, revenueProduction: 0 },   // Consumer: fast users, no revenue
+    platform: { mauProduction: 2, revenueProduction: 1 },   // Platform: balanced
+  };
+
+  const base = baseProduction[product.id] || { mauProduction: 2, revenueProduction: 1 };
+
+  // Move-fast tech gives +1 MAU production at start
+  const mauBonus = tech.id === 'move-fast' ? 1 : 0;
+
+  return {
+    mauProduction: base.mauProduction + mauBonus,
+    revenueProduction: base.revenueProduction,
+  };
+}
+
+// ============================================
+// STARTING RATING (by product type, 1-10 integer)
+// ============================================
+
+export function getStartingRating(product: ProductOption): number {
+  const ratings: Record<string, number> = {
+    b2b: 5,        // Average — business users are forgiving
+    consumer: 6,   // Slightly above average — consumer polish expected
+    platform: 5,   // Balanced
+  };
+  return ratings[product.id] || 5;
+}
+
 export function getStartingResources(
   funding: FundingOption,
   tech: TechOption
@@ -128,6 +169,6 @@ export function getStartingMetrics(product: ProductOption) {
   return {
     mau: Math.round(1000 * product.mauMultiplier),
     revenue: Math.round(500 * product.revenueMultiplier),
-    rating: 3.0 * product.ratingMultiplier,
+    rating: getStartingRating(product),
   };
 }

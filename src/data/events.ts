@@ -8,7 +8,7 @@ export const EVENTS: GameEvent[] = [
     description: 'Hackers target your servers with a distributed denial of service attack.',
     effect: {
       mauChange: -500,
-      ratingChange: -0.3,
+      ratingChange: -1,
       resourceChanges: { techDebt: 1 }, // Emergency patches add debt
       special: 'Users cant access your app',
     },
@@ -16,7 +16,6 @@ export const EVENTS: GameEvent[] = [
       condition: 'Server capacity > 20',
       reducedEffect: {
         mauChange: -100,
-        ratingChange: -0.1,
         special: 'Your robust infrastructure absorbed most of the attack',
       },
     },
@@ -45,13 +44,13 @@ export const EVENTS: GameEvent[] = [
     description: 'An influencer posts about your app! Massive traffic incoming.',
     effect: {
       mauChange: 2000,
-      special: 'If MAU > Server Capacity * 100, crash: lose half the new users and -0.5 rating',
+      special: 'If MAU > Server Capacity * 100, crash: lose half the new users and -2 rating',
     },
     mitigation: {
       condition: 'Server capacity sufficient for surge',
       reducedEffect: {
         mauChange: 2000,
-        ratingChange: 0.2,
+        ratingChange: 1,
         special: 'Your infrastructure handled the surge beautifully!',
       },
     },
@@ -62,7 +61,7 @@ export const EVENTS: GameEvent[] = [
     name: 'Data Breach',
     description: 'Hackers exploited a vulnerability. User data may be compromised.',
     effect: {
-      ratingChange: -0.5,
+      ratingChange: -2,
       revenueChange: -200,
       resourceChanges: { techDebt: 2 }, // Emergency security patches
       special: 'Bad press and potential lawsuits',
@@ -70,7 +69,7 @@ export const EVENTS: GameEvent[] = [
     mitigation: {
       condition: 'Tech debt < 4',
       reducedEffect: {
-        ratingChange: -0.1,
+        ratingChange: -1,
         revenueChange: -50,
         special: 'Clean code meant quick patch and limited exposure',
       },
@@ -87,7 +86,7 @@ export const EVENTS: GameEvent[] = [
       special: 'Users checking out the competition',
     },
     mitigation: {
-      condition: 'Rating > 4.0',
+      condition: 'Rating > 7',
       reducedEffect: {
         mauChange: -50,
         special: 'Your loyal users stick with you',
@@ -101,7 +100,7 @@ export const EVENTS: GameEvent[] = [
     description: 'A sophisticated botnet targets your API endpoints.',
     effect: {
       mauChange: -400,
-      ratingChange: -0.2,
+      ratingChange: -1,
       resourceChanges: { money: -10, techDebt: 1 }, // Emergency patches add debt
       special: 'Emergency mitigation costs extra',
     },
@@ -128,7 +127,7 @@ export const EVENTS: GameEvent[] = [
       reducedEffect: {
         mauChange: 1500,
         revenueChange: 200,
-        ratingChange: 0.3,
+        ratingChange: 1,
         special: 'Flawless launch day!',
       },
     },
@@ -139,8 +138,8 @@ export const EVENTS: GameEvent[] = [
     name: 'Dependency Vulnerability',
     description: 'Critical CVE discovered in a core dependency.',
     effect: {
-      ratingChange: -0.3,
-      resourceChanges: { techDebt: 3 }, // Increased from 2 to 3
+      ratingChange: -1,
+      resourceChanges: { techDebt: 3 },
       special: 'Emergency patching adds significant debt',
     },
     mitigation: {
@@ -181,7 +180,7 @@ export function checkMitigation(
   }
 
   if (condition.includes('rating >')) {
-    const threshold = parseFloat(condition.match(/[\d.]+/)?.[0] || '0');
+    const threshold = parseInt(condition.match(/\d+/)?.[0] || '0');
     return metrics.rating > threshold;
   }
 

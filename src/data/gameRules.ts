@@ -44,7 +44,7 @@ export const gameRules = {
       {
         name: 'Rating',
         fullName: 'Rating',
-        description: 'User satisfaction (1.0 - 5.0 scale)',
+        description: 'User satisfaction (1-10 integer scale)',
       },
     ],
   },
@@ -66,10 +66,10 @@ export const gameRules = {
       badge: 'NEW',
       description: '~35% of engineers have special traits that affect gameplay:',
       items: [
-        { trait: 'AI Skeptic', effect: 'Cannot use AI, but +10% base productivity' },
-        { trait: 'Equity-Hungry', effect: 'Costs +$5, but +20% productivity if retained 2+ rounds' },
+        { trait: 'AI Skeptic', effect: 'Cannot use AI, but +1 base power' },
+        { trait: 'Equity-Hungry', effect: 'Costs +$5, but +1 power if retained 2+ rounds' },
         { trait: 'Startup Veteran', effect: 'Immune to negative event effects' },
-        { trait: 'Night Owl', effect: '+30% productivity on last action assigned each round' },
+        { trait: 'Night Owl', effect: '+1 power on last action assigned each round' },
       ],
     },
     {
@@ -216,13 +216,13 @@ export const gameRules = {
                 Approach: 'Quality-Focused',
                 'Starting AI Capacity': '1',
                 'Starting Tech Debt': '0',
-                'Special Bonus': '+0.1 rating bonus each round',
+                'Special Bonus': '+1 rating at end of each round',
               },
               {
                 Approach: 'Move-Fast',
                 'Starting AI Capacity': '2',
                 'Starting Tech Debt': '3',
-                'Special Bonus': '+200 MAU per "Develop Features" action',
+                'Special Bonus': '+1 MAU production at start, debt accumulates faster',
               },
             ],
           },
@@ -278,24 +278,24 @@ export const gameRules = {
         {
           title: 'Engineer Types',
           table: {
-            headers: ['Type', 'Base Productivity', 'Typical Salary'],
+            headers: ['Type', 'Base Power', 'Typical Salary'],
             rows: [
-              { Type: 'Senior', 'Base Productivity': '1.0x', 'Typical Salary': '~$30' },
-              { Type: 'Junior', 'Base Productivity': '0.5x', 'Typical Salary': '~$15' },
-              { Type: 'Intern', 'Base Productivity': '0.3x', 'Typical Salary': '~$5' },
+              { Type: 'Senior', 'Base Power': '4', 'Typical Salary': '~$30' },
+              { Type: 'Junior', 'Base Power': '2', 'Typical Salary': '~$15' },
+              { Type: 'Intern', 'Base Power': '1', 'Typical Salary': '~$5' },
             ],
           },
         },
         {
           title: 'Engineer Specialties',
           table: {
-            headers: ['Specialty', 'Primary Bonus', 'Secondary Bonus'],
+            headers: ['Specialty', 'Matching Actions', 'Bonus'],
             rows: [
-              { Specialty: 'Frontend', 'Primary Bonus': '+20% Develop Features', 'Secondary Bonus': '+10% Marketing' },
-              { Specialty: 'Backend', 'Primary Bonus': '+20% Optimize Code', 'Secondary Bonus': '+10% Server Upgrades' },
-              { Specialty: 'Fullstack', 'Primary Bonus': '+10% Develop Features', 'Secondary Bonus': '+10% Optimize Code' },
-              { Specialty: 'DevOps', 'Primary Bonus': '+30% Upgrade Servers', 'Secondary Bonus': '+10% Research AI' },
-              { Specialty: 'AI', 'Primary Bonus': '+30% Research AI', 'Secondary Bonus': '+10% Optimize Code' },
+              { Specialty: 'Frontend', 'Matching Actions': 'Develop Features, Marketing', Bonus: '+1 power' },
+              { Specialty: 'Backend', 'Matching Actions': 'Optimize Code, Upgrade Servers', Bonus: '+1 power' },
+              { Specialty: 'Fullstack', 'Matching Actions': 'Develop Features, Optimize Code', Bonus: '+1 power' },
+              { Specialty: 'DevOps', 'Matching Actions': 'Upgrade Servers, Research AI', Bonus: '+1 power' },
+              { Specialty: 'AI', 'Matching Actions': 'Research AI, Optimize Code', Bonus: '+1 power' },
             ],
           },
         },
@@ -308,12 +308,12 @@ export const gameRules = {
             rows: [
               {
                 Trait: 'AI Skeptic',
-                Effect: 'Cannot use AI augmentation, but has +10% base productivity',
+                Effect: 'Cannot use AI augmentation, but has +1 base power',
                 'Strategy Tips': 'Best for quality-focused strategies; no AI debt risk',
               },
               {
                 Trait: 'Equity-Hungry',
-                Effect: 'Costs +$5 to hire, but gains +20% productivity if retained for 2+ rounds',
+                Effect: 'Costs +$5 to hire, but gains +1 power if retained for 2+ rounds',
                 'Strategy Tips': 'Hire early for maximum value; great long-term investment',
               },
               {
@@ -323,16 +323,16 @@ export const gameRules = {
               },
               {
                 Trait: 'Night Owl',
-                Effect: '+30% productivity on the last action assigned each round',
+                Effect: '+1 power on the last action assigned each round',
                 'Strategy Tips': 'Assign to your most important action last!',
               },
             ],
           },
           tips: [
-            { trait: 'AI Skeptic', tip: 'Ideal for players avoiding tech debt. They produce more without needing AI.' },
-            { trait: 'Equity-Hungry', tip: 'Plan to keep them! Round 1 hires get the bonus in Rounds 3-4.' },
+            { trait: 'AI Skeptic', tip: 'Ideal for players avoiding tech debt. +1 power without needing AI.' },
+            { trait: 'Equity-Hungry', tip: 'Plan to keep them! Round 1 hires get the +1 power bonus in Rounds 3-4.' },
             { trait: 'Startup Veteran', tip: 'Insurance against bad events. One veteran protects your whole company.' },
-            { trait: 'Night Owl', tip: 'Order your action assignments carefully - save them for last!' },
+            { trait: 'Night Owl', tip: 'Order your action assignments carefully - save them for last for +1 power!' },
           ],
         },
         {
@@ -362,7 +362,7 @@ export const gameRules = {
               { Action: 'Monetize Users', Effect: '+Revenue (depends on user base & product type)' },
               { Action: 'Optimize Code', Effect: '-Tech Debt (triggers puzzle phase if 2+ engineers)' },
               { Action: 'Upgrade Servers', Effect: '+Revenue & MAU (scales with DevOps talent)' },
-              { Action: 'Research AI', Effect: '+AI capacity, improves productivity' },
+              { Action: 'Research AI', Effect: '+AI capacity (AI adds +2 power per engineer)' },
             ],
           },
         },
@@ -441,7 +441,7 @@ export const gameRules = {
   scoring: {
     title: 'End of Game Scoring',
     description: 'After Round 4, calculate your total startup value:',
-    formula: 'Final Score = (MAU / 100) + Revenue + (Rating x 10) + Milestones + Equity Retained Bonus',
+    formula: 'Final Score = (MAU / 100) + Revenue + (Rating x 5) + Milestones + Equity Retained Bonus',
     note: 'More equity retained increases your final score multiplier.',
   },
 
@@ -452,7 +452,7 @@ export const gameRules = {
     items: [
       { name: '10K Users', requirement: 'Reach 10,000 MAU', bonus: '+5 points', icon: '👥' },
       { name: '$100 Revenue', requirement: 'Reach $100 revenue', bonus: '+5 points', icon: '💰' },
-      { name: '5-Star App', requirement: 'Reach 5.0 rating', bonus: '+5 points', icon: '⭐' },
+      { name: '5-Star App', requirement: 'Reach 9+ rating (5 stars)', bonus: '+5 points', icon: '⭐' },
       { name: 'Zero Debt', requirement: 'Tech debt reduced to 0', bonus: '+5 points', icon: '🔧' },
       { name: 'AI Mastery', requirement: 'Reach AI capacity 8', bonus: '+5 points', icon: '🤖' },
     ],
@@ -463,13 +463,13 @@ export const gameRules = {
     rules: [
       {
         name: 'AI Augmentation',
-        description: 'If AI is used on actions, it increases productivity but adds tech debt (unless AI-First).',
+        description: 'AI adds +2 power to any engineer but generates tech debt (less for AI-First strategy).',
       },
       {
         name: 'Tech Debt Penalty',
-        description: 'Every point of tech debt reduces productivity by 5%.',
+        description: 'Every 4 points of tech debt gives -1 power penalty to all engineers.',
       },
-      { name: 'Rating Cap', description: 'Rating cannot exceed 5.0 or fall below 1.0.' },
+      { name: 'Rating Cap', description: 'Rating is an integer from 1 to 10.' },
       { name: 'MAU Floor', description: 'MAU cannot fall below 0.' },
       { name: 'Revenue Floor', description: 'Revenue cannot fall below 0.' },
       {

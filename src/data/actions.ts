@@ -4,20 +4,21 @@ export const ACTION_SPACES: ActionSpace[] = [
   {
     id: 'develop-features',
     name: 'Develop Features',
-    description: 'Build new features to attract users. More engineers = more output.',
+    description: 'Build new features to attract users. More power = more MAU.',
     maxWorkers: 3, // Competitive: only 3 players can develop features per round
     effect: {
-      mauChange: 500,
-      special: 'Output scales with engineer count and productivity',
+      mauChange: 100, // Per power point: +100 MAU
+      mauProductionDelta: 1, // Move MAU production marker +1
+      special: 'Gain +100 MAU per power. Also advances MAU production track by 1.',
     },
   },
   {
     id: 'optimize-code',
     name: 'Optimize Code',
-    description: 'Refactor and improve code quality. Triggers puzzle mini-game!',
-    // No maxWorkers - puzzle handles competition
+    description: 'Refactor and improve code quality. Triggers sprint mini-game!',
+    // No maxWorkers - sprint handles competition
     effect: {
-      ratingChange: 0.1,
+      ratingChange: 1,
       resourceChanges: { techDebt: -1 },
       triggersMinigame: true,
       special: 'Winner gets bonus debt reduction (scales with engineers assigned)',
@@ -62,10 +63,10 @@ export const ACTION_SPACES: ActionSpace[] = [
     maxWorkers: 1, // Only one player can dominate marketing per round!
     requiredResources: { money: 20 },
     effect: {
-      mauChange: 1000,
-      ratingChange: 0.1,
+      mauChange: 200, // Per power point: +200 MAU
+      ratingChange: 1,
       resourceChanges: { money: -20 },
-      special: 'Effectiveness scales with current rating. Exclusive action!',
+      special: 'Gain +200 MAU per power. Effectiveness scales with rating. Exclusive action!',
     },
   },
   {
@@ -75,8 +76,9 @@ export const ACTION_SPACES: ActionSpace[] = [
     maxWorkers: 2, // Limited monetization slots
     effect: {
       revenueChange: 300,
-      ratingChange: -0.1,
-      special: 'Revenue scales with MAU. Aggressive monetization hurts rating.',
+      ratingChange: -1,
+      revenueProductionDelta: 1, // Move revenue production marker +1
+      special: 'Revenue scales with MAU. Advances revenue production. Aggressive monetization hurts rating.',
     },
   },
   {
@@ -102,7 +104,8 @@ export const ACTION_SPACES: ActionSpace[] = [
     unlocksAtRound: 3, // Available from Round 3
     effect: {
       resourceChanges: { money: -15 },
-      special: '50% chance: +3000 MAU, 50% chance: -1000 MAU',
+      mauProductionDelta: 2, // On success, advance MAU production by 2
+      special: '50% chance: +3000 MAU & +2 MAU production, 50% chance: -1000 MAU',
     },
   },
   {
