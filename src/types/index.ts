@@ -851,3 +851,32 @@ export type AIResearchLevel = 0 | 1 | 2;
 
 // Corporation style (replaces FundingType)
 export type CorporationStyle = 'agency' | 'product';
+
+// ============================================================
+// APP CARD TYPES
+// ============================================================
+
+export type AppCardTier = 'small' | 'medium' | 'large';
+
+export interface AppCard {
+  id: string;
+  name: string;
+  client: string;
+  tier: AppCardTier;
+  footprint: GridSize; // rows x cols bounding box
+  pattern: GridCell[][]; // the pattern within the footprint
+  tokenCount: number; // non-null cells in pattern
+  maxVP: number; // VP at 5 stars
+  maxMoney: number; // $ at 5 stars
+  // starThresholds[0] = min tokens for 1 star, ..., [4] = tokens for 5 star
+  starThresholds: [number, number, number, number, number];
+}
+
+// Published app record (tracked on player)
+export interface PublishedApp {
+  cardId: string;
+  name: string;
+  stars: number; // 1-5
+  vpEarned: number;
+  moneyEarned: number;
+}
