@@ -3555,8 +3555,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (cardIndex === -1) return;
     const card = player.heldAppCards[cardIndex];
 
-    // Count matched tokens at the given position
-    const matched = matchPatternAtPosition(player.codeGrid, card.pattern, row, col);
+    // Count matched tokens at the given position, plus marketing star bonus
+    const baseMatched = matchPatternAtPosition(player.codeGrid, card.pattern, row, col);
+    const matched = baseMatched + (player.marketingStarBonus || 0);
     const stars = getStarRating(card, matched);
 
     // Calculate VP and money based on star fraction
@@ -3587,6 +3588,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           resources: { ...p.resources, money: p.resources.money + moneyEarned },
           codeGrid: newGrid,
           heldAppCards: newHeldCards,
+          marketingStarBonus: 0, // Consumed on publish
         };
       }),
     }));
