@@ -787,3 +787,67 @@ export interface PersonaCard {
   leaderSide: LeaderSide;
   engineerSide: PersonaEngineerSide;
 }
+
+// ============================================================
+// GRID SYSTEM TYPES (Code Grid Redesign)
+// ============================================================
+
+// Token colors map to engineer specialties
+export type TokenColor = 'green' | 'orange' | 'blue' | 'purple';
+
+export const TOKEN_COLORS: TokenColor[] = ['green', 'orange', 'blue', 'purple'];
+
+// Maps specialty -> token color
+export const SPECIALTY_TO_COLOR: Record<string, TokenColor> = {
+  frontend: 'green',
+  backend: 'orange',
+  fullstack: 'blue',
+  devops: 'purple',
+};
+
+// Grid expansion levels: 0 = 4x4, 1 = 4x5, 2 = 5x5
+export interface GridSize {
+  rows: number;
+  cols: number;
+}
+
+export const GRID_SIZES: GridSize[] = [
+  { rows: 4, cols: 4 },
+  { rows: 4, cols: 5 },
+  { rows: 5, cols: 5 },
+];
+
+// A cell is either null (empty) or holds a token color
+export type GridCell = TokenColor | null;
+
+// The player's code grid
+export interface CodeGrid {
+  cells: GridCell[][];
+  expansionLevel: number; // 0, 1, or 2
+}
+
+export function createEmptyGrid(expansionLevel: number = 0): CodeGrid {
+  const size = GRID_SIZES[expansionLevel];
+  const cells: GridCell[][] = Array.from({ length: size.rows }, () =>
+    Array.from({ length: size.cols }, () => null)
+  );
+  return { cells, expansionLevel };
+}
+
+// Tech debt buffer
+export const TECH_DEBT_BUFFER_SIZE = 4;
+
+export interface TechDebtBuffer {
+  tokens: TokenColor[];
+  maxSize: number;
+}
+
+export function createEmptyBuffer(): TechDebtBuffer {
+  return { tokens: [], maxSize: TECH_DEBT_BUFFER_SIZE };
+}
+
+// AI research level (0-2)
+export type AIResearchLevel = 0 | 1 | 2;
+
+// Corporation style (replaces FundingType)
+export type CorporationStyle = 'agency' | 'product';
