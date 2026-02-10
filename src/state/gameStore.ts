@@ -257,6 +257,11 @@ function createInitialPlayer(index: number): Player {
     publishedApps: [],
     heldAppCards: [],
     commitCodeUsedThisRound: false,
+    // Action Draft redesign fields
+    marketingStarBonus: 0,
+    committedCodeCount: 0,
+    recurringRevenue: 0,
+    mauMilestonesClaimed: [],
   };
 }
 

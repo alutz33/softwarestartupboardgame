@@ -473,6 +473,11 @@ export interface Player {
   heldAppCards: AppCard[];
   corporationStyle?: CorporationStyle;
   commitCodeUsedThisRound: boolean;
+  // Action Draft redesign fields
+  marketingStarBonus: number;       // +1 star bonus from marketing (agency), consumed on publish
+  committedCodeCount: number;       // total successful commit-code actions (product scoring)
+  recurringRevenue: number;         // $1/round per committed code (product), applied at round end
+  mauMilestonesClaimed: string[];   // which MAU milestone IDs have been scored (product)
 }
 
 // ============================================
@@ -486,11 +491,12 @@ export type GamePhase =
   | 'startup-draft'           // Legacy: Terraforming Mars-style startup card selection
   | 'corporation-selection'   // Legacy: kept for backwards compatibility
   | 'engineer-draft'
-  | 'planning'
-  | 'reveal'
+  | 'action-draft'            // NEW: Real-time action draft with immediate resolution
+  | 'planning'                // Legacy: kept for backwards compatibility
+  | 'reveal'                  // Legacy: kept for backwards compatibility
   | 'puzzle'
   | 'sprint'                    // Phase 3: Push-your-luck sprint mini-game
-  | 'resolution'
+  | 'resolution'              // Legacy: kept for backwards compatibility
   | 'event'
   | 'round-end'
   | 'game-end';
@@ -532,6 +538,8 @@ export interface RoundState {
   // Grid redesign: shared code pool and app card market
   codePool: TokenColor[];               // Shared pool of code tokens available this round
   appMarket: AppCard[];                 // Face-up app cards available for claiming
+  // Action Draft: turn tracking within the draft
+  turnState?: TurnState;
 }
 
 // ============================================
@@ -864,6 +872,23 @@ export type AIResearchLevel = 0 | 1 | 2;
 
 // Corporation style (replaces FundingType)
 export type CorporationStyle = 'agency' | 'product';
+
+// Turn state within Action Draft phase
+export type TurnPhase = 'free-actions' | 'place-engineer' | 'resolving' | 'mini-game';
+
+export interface TurnState {
+  currentPlayerIndex: number;
+  phase: TurnPhase;
+  pendingAction?: ActionType; // action being resolved (for interactive resolution)
+}
+
+// MAU Milestones (Product corporation scoring)
+export const MAU_MILESTONES = [
+  { id: 'mau-1k', threshold: 1000, vp: 1 },
+  { id: 'mau-2.5k', threshold: 2500, vp: 2 },
+  { id: 'mau-5k', threshold: 5000, vp: 3 },
+  { id: 'mau-10k', threshold: 10000, vp: 5 },
+] as const;
 
 // ============================================================
 // APP CARD TYPES

@@ -95,6 +95,22 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
       "If you're behind in MAU, you pick first!",
     ],
   },
+  'action-draft': {
+    title: 'Action Draft',
+    emoji: 'Action Draft',
+    description: 'Take turns placing engineers on actions. Effects resolve immediately!',
+    steps: [
+      '1. Free actions: Publish App, Commit Code, or Use Leader Power',
+      '2. Place an engineer on an action space',
+      '3. Resolve the action immediately (pick tokens, swap grid, etc.)',
+      '4. Next player goes (snake order by VP)',
+    ],
+    tips: [
+      'Lowest VP goes first — catch-up mechanic!',
+      'Develop Features lets you pick a token from the pool',
+      'Publish apps to score VP (Agency) or commit code for recurring revenue (Product)',
+    ],
+  },
   'planning': {
     title: 'Plan Your Actions',
     emoji: 'Plan Your Actions',
