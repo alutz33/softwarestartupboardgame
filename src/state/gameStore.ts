@@ -463,6 +463,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return {
           ...p,
           strategy,
+          corporationStyle: fundingType === 'bootstrapped' ? 'product' as const : 'agency' as const,
           resources,
           metrics,
           productionTracks,
@@ -2131,6 +2132,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
             }
 
             case 'optimize-code': {
+              // GRID REDESIGN STUB: Each power point = 1 swap on the grid
+              // (swap 2 adjacent tokens' positions to rearrange patterns).
+              // TODO: Add interactive swap UI — player picks pairs of adjacent
+              //       cells to swap, up to `totalPower` swaps per action.
+              //       Requires a modal/overlay showing the grid with swap targets.
+
+              // Keep existing tech debt reduction — still useful in grid system
               newResources.techDebt = Math.max(0, newResources.techDebt - 1);
               // +1 rating (integer), or +2 with double-optimize leader passive (Grace Debugger)
               let optimizeRating = actionSpace.effect.ratingChange || 0;
@@ -2204,6 +2212,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
             }
 
             case 'marketing': {
+              // GRID REDESIGN STUB: Marketing action redesign
+              // TODO: New cost: $2-3 (down from $10-20)
+              // TODO: New effect: +1 star bonus on next published app
+              //       (store as player.marketingStarBonus or similar field)
+              // TODO: Remove MAU-based logic below once grid system is complete
+
               // Pay cost once per action type
               const marketingCost = hasAbility(player, 'marketing-discount') ? 10 : 20;
               if (!costsPaid.has('marketing')) {
@@ -2245,6 +2259,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
             }
 
             case 'monetization': {
+              // GRID REDESIGN STUB: Monetization action redesign
+              // TODO: New effect: Gain $1 per total star across all published apps
+              //       e.g. const totalStars = player.publishedApps.reduce((s, a) => s + a.stars, 0);
+              //       newResources.money += totalStars;
+              // TODO: Remove MAU/revenue-based logic below once grid system is complete
+
               // Revenue scales with MAU and power
               let revenue = Math.round(
                 (actionSpace.effect.revenueChange || 300) * totalPower * (newMetrics.mau / 1000)
@@ -2760,6 +2780,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Production track bonus: +1 per MAU production level, +2 per revenue production level
       score += player.productionTracks.mauProduction * 1;
       score += player.productionTracks.revenueProduction * 2;
+
+      // Grid system scoring (published apps)
+      let gridScore = 0;
+      for (const app of player.publishedApps) {
+        gridScore += app.vpEarned;
+      }
+      // TODO: Add commit code VP for product corporations
+      // TODO: Add money conversion (1 VP per $X remaining)
+      // TODO: Remove old MAU/revenue/rating formula once grid system is complete
+      score += gridScore;
 
       // Score is now directly calculated without equity multiplier.
       // Funding balance comes from starting resources and unique powers:
