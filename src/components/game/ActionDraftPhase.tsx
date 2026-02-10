@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '../../state/gameStore';
 import { getAvailableActions } from '../../data/actions';
@@ -35,6 +35,14 @@ export function ActionDraftPhase() {
   const getActionOccupancy = useGameStore((s) => s.getActionOccupancy);
   const endTurn = useGameStore((s) => s.endTurn);
   const claimAppCard = useGameStore((s) => s.claimAppCard);
+  const startActionDraft = useGameStore((s) => s.startActionDraft);
+
+  // Initialize turn state when entering the action-draft phase
+  useEffect(() => {
+    if (!roundState.turnState) {
+      startActionDraft();
+    }
+  }, [roundState.turnState, startActionDraft]);
 
   // Local UI state
   const [selectedEngineerId, setSelectedEngineerId] = useState<string | null>(null);

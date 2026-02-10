@@ -13,6 +13,7 @@ import {
   EventPhase,
   RoundEnd,
   GameEnd,
+  ActionDraftPhase,
 } from './components/game';
 import { PuzzleGame } from './components/puzzle';
 import { GameRulesHeader } from './components/GameRulesHeader';
@@ -34,6 +35,8 @@ function App() {
         return <CorporationSelection />; // Legacy, kept for backwards compatibility
       case 'engineer-draft':
         return <EngineerDraft />;
+      case 'action-draft':
+        return <ActionDraftPhase />;
       case 'planning':
         return <PlanningPhase />;
       case 'reveal':
@@ -56,7 +59,7 @@ function App() {
   };
 
   // Hide standalone rules header during planning phase (rules button is in the turn banner)
-  const showRulesHeader = phase !== 'planning';
+  const showRulesHeader = phase !== 'planning' && phase !== 'action-draft';
 
   return (
     <div className="min-h-screen bg-gray-900">
