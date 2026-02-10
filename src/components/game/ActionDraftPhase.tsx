@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../state/gameStore';
 import { getAvailableActions } from '../../data/actions';
+import { matchPatternAtPosition } from '../../state/gridHelpers';
+import { getStarRating } from '../../data/appCards';
 import { CodeGridView } from '../ui/CodeGridView';
 import { TechDebtBufferView } from '../ui/TechDebtBufferView';
 import { CodePoolView } from '../ui/CodePoolView';
@@ -11,8 +13,18 @@ import { EngineerToken } from '../ui/EngineerToken';
 import { AiAugmentationModal } from '../ui/AiAugmentationModal';
 import { Badge, Tooltip } from '../ui';
 import { TOKEN_COLORS_MAP, TOKEN_LABELS } from '../ui/tokenConstants';
-import type { ActionType } from '../../types';
+import type { ActionType, AppCard } from '../../types';
 import { getTechDebtLevel } from '../../types';
+
+// ---- Free action mode types ----
+type FreeActionMode =
+  | null
+  | { type: 'publish-select-card' }
+  | { type: 'publish-place'; card: AppCard }
+  | { type: 'publish-result'; card: AppCard; stars: number; vp: number; money: number }
+  | { type: 'commit-agency' }
+  | { type: 'commit-product-start' }
+  | { type: 'commit-product-direction'; row: number; col: number };
 
 // ---- Optimize-Code Mini-Game Types ----
 
@@ -79,6 +91,8 @@ export function ActionDraftPhase() {
   const placeTokenOnGrid = useGameStore((s) => s.placeTokenOnGrid);
   const performGridSwap = useGameStore((s) => s.performGridSwap);
   const completeInteractiveAction = useGameStore((s) => s.completeInteractiveAction);
+  const publishApp = useGameStore((s) => s.publishApp);
+  const commitCode = useGameStore((s) => s.commitCode);
 
   // Initialize turn state when entering the action-draft phase
   useEffect(() => {
@@ -95,6 +109,9 @@ export function ActionDraftPhase() {
     actionType: ActionType;
   } | null>(null);
   const [selectedTokenIndex, setSelectedTokenIndex] = useState<number | null>(null);
+
+  // Free action mode state
+  const [freeActionMode, setFreeActionMode] = useState<FreeActionMode>(null);
 
   // Optimize-code mini-game state
   const [optimizeGame, setOptimizeGame] = useState<OptimizeMiniGameState | null>(null);
@@ -212,8 +229,86 @@ export function ActionDraftPhase() {
 
   const handleEndTurn = () => {
     setSelectedEngineerId(null);
+    setFreeActionMode(null);
     endTurn();
   };
+
+  // ---- Free Action Handlers ----
+
+  const handlePublishAppClick = useCallback(() => {
+    if (currentPlayer.corporationStyle !== 'agency') return;
+    if (currentPlayer.heldAppCards.length === 0) return;
+    setFreeActionMode({ type: 'publish-select-card' });
+  }, [currentPlayer.corporationStyle, currentPlayer.heldAppCards.length]);
+
+  const handlePublishSelectCard = useCallback((card: AppCard) => {
+    setFreeActionMode({ type: 'publish-place', card });
+  }, []);
+
+  const handlePublishPlaceOnGrid = useCallback((row: number, col: number) => {
+    if (freeActionMode?.type !== 'publish-place') return;
+    const card = freeActionMode.card;
+
+    // Preview the match count before calling the store
+    const baseMatched = matchPatternAtPosition(currentPlayer.codeGrid, card.pattern, row, col);
+    const matched = baseMatched + (currentPlayer.marketingStarBonus || 0);
+    const stars = getStarRating(card, matched);
+    const vpEarned = Math.max(1, Math.floor(card.maxVP * (stars / 5)));
+    const moneyEarned = Math.floor(card.maxMoney * (stars / 5));
+
+    // Call the store action
+    publishApp(currentPlayer.id, card.id, row, col);
+
+    // Show result
+    setFreeActionMode({
+      type: 'publish-result',
+      card,
+      stars,
+      vp: vpEarned,
+      money: moneyEarned,
+    });
+  }, [freeActionMode, currentPlayer.codeGrid, currentPlayer.id, currentPlayer.marketingStarBonus, publishApp]);
+
+  const handleCommitCodeClick = useCallback(() => {
+    if (currentPlayer.commitCodeUsedThisRound) return;
+    if (currentPlayer.corporationStyle === 'agency') {
+      setFreeActionMode({ type: 'commit-agency' });
+    } else {
+      setFreeActionMode({ type: 'commit-product-start' });
+    }
+  }, [currentPlayer.commitCodeUsedThisRound, currentPlayer.corporationStyle]);
+
+  const handleCommitAgencyGridClick = useCallback((row: number, col: number) => {
+    if (freeActionMode?.type !== 'commit-agency') return;
+    const cell = currentPlayer.codeGrid.cells[row]?.[col];
+    if (cell === null || cell === undefined) return;
+    commitCode(currentPlayer.id, row, col);
+    setFreeActionMode(null);
+  }, [freeActionMode, currentPlayer.codeGrid.cells, currentPlayer.id, commitCode]);
+
+  const handleCommitProductStartClick = useCallback((row: number, col: number) => {
+    if (freeActionMode?.type !== 'commit-product-start') return;
+    const cell = currentPlayer.codeGrid.cells[row]?.[col];
+    if (cell === null || cell === undefined) return;
+    setFreeActionMode({ type: 'commit-product-direction', row, col });
+  }, [freeActionMode, currentPlayer.codeGrid.cells]);
+
+  const handleCommitProductDirection = useCallback((direction: 'row' | 'col', count: 3 | 4) => {
+    if (freeActionMode?.type !== 'commit-product-direction') return;
+    commitCode(currentPlayer.id, freeActionMode.row, freeActionMode.col, direction, count);
+    setFreeActionMode(null);
+  }, [freeActionMode, currentPlayer.id, commitCode]);
+
+  const handleLeaderPowerClick = useCallback(() => {
+    if (currentPlayer.leaderPowerUsed) return;
+    alert(
+      `Leader power "${currentPlayer.leader?.leaderSide.power?.name ?? 'Unknown'}" activated! (Store action not yet implemented — this is a placeholder.)`
+    );
+  }, [currentPlayer.leaderPowerUsed, currentPlayer.leader]);
+
+  const cancelFreeAction = useCallback(() => {
+    setFreeActionMode(null);
+  }, []);
 
   // ---- Optimize-Code Mini-Game Handlers ----
 
@@ -361,6 +456,27 @@ export function ActionDraftPhase() {
 
   const isMyTurn = turnState?.phase === 'free-actions' || turnState?.phase === 'place-engineer';
 
+  // Determine which grid click handler to use based on free action mode
+  const getGridClickHandler = (): ((row: number, col: number) => void) | undefined => {
+    if (!isMyTurn) return undefined;
+    if (freeActionMode?.type === 'publish-place') return handlePublishPlaceOnGrid;
+    if (freeActionMode?.type === 'commit-agency') return handleCommitAgencyGridClick;
+    if (freeActionMode?.type === 'commit-product-start') return handleCommitProductStartClick;
+    return undefined;
+  };
+
+  const canPublish =
+    isMyTurn &&
+    currentPlayer.corporationStyle === 'agency' &&
+    currentPlayer.heldAppCards.length > 0;
+
+  const canCommit = isMyTurn && !currentPlayer.commitCodeUsedThisRound;
+
+  const canUseLeaderPower =
+    isMyTurn &&
+    !currentPlayer.leaderPowerUsed &&
+    !!currentPlayer.leader?.leaderSide.power;
+
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
       {/* ===== TOP BAR ===== */}
@@ -425,6 +541,114 @@ export function ActionDraftPhase() {
         </div>
       </header>
 
+      {/* ===== FREE ACTION MODE BANNER ===== */}
+      <AnimatePresence>
+        {freeActionMode && freeActionMode.type !== 'publish-result' && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-indigo-900/60 border-b border-indigo-500/50 overflow-hidden"
+          >
+            <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {freeActionMode.type === 'publish-select-card' && (
+                  <>
+                    <Badge variant="info" size="sm">Publish App</Badge>
+                    <span className="text-sm text-gray-200">
+                      Select a held app card to publish
+                    </span>
+                  </>
+                )}
+                {freeActionMode.type === 'publish-place' && (
+                  <>
+                    <Badge variant="info" size="sm">Publish App</Badge>
+                    <span className="text-sm text-gray-200">
+                      Click a grid cell for the top-left corner of &quot;{freeActionMode.card.name}&quot;
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      ({freeActionMode.card.footprint.rows}x{freeActionMode.card.footprint.cols} pattern)
+                    </span>
+                  </>
+                )}
+                {freeActionMode.type === 'commit-agency' && (
+                  <>
+                    <Badge variant="warning" size="sm">Commit Code</Badge>
+                    <span className="text-sm text-gray-200">
+                      Click a token on your grid to remove it
+                    </span>
+                  </>
+                )}
+                {freeActionMode.type === 'commit-product-start' && (
+                  <>
+                    <Badge variant="warning" size="sm">Commit Code</Badge>
+                    <span className="text-sm text-gray-200">
+                      Click the starting cell of a 3-same-color or 4-all-different line
+                    </span>
+                  </>
+                )}
+                {freeActionMode.type === 'commit-product-direction' && (
+                  <>
+                    <Badge variant="warning" size="sm">Commit Code</Badge>
+                    <span className="text-sm text-gray-200">
+                      Choose direction and count from cell ({freeActionMode.row}, {freeActionMode.col})
+                    </span>
+                  </>
+                )}
+              </div>
+              <button
+                onClick={cancelFreeAction}
+                className="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== COMMIT PRODUCT DIRECTION PICKER ===== */}
+      <AnimatePresence>
+        {freeActionMode?.type === 'commit-product-direction' && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-gray-800/80 border-b border-gray-600 overflow-hidden"
+          >
+            <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center gap-4">
+              <span className="text-sm text-gray-300">Direction:</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCommitProductDirection('row', 3)}
+                  className="px-3 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+                >
+                  3 in Row (same color)
+                </button>
+                <button
+                  onClick={() => handleCommitProductDirection('col', 3)}
+                  className="px-3 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+                >
+                  3 in Column (same color)
+                </button>
+                <button
+                  onClick={() => handleCommitProductDirection('row', 4)}
+                  className="px-3 py-1.5 text-xs rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
+                >
+                  4 in Row (all different)
+                </button>
+                <button
+                  onClick={() => handleCommitProductDirection('col', 4)}
+                  className="px-3 py-1.5 text-xs rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
+                >
+                  4 in Column (all different)
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ===== MAIN 3-PANEL LAYOUT ===== */}
       <div className="flex-1 overflow-hidden">
         <div className="max-w-[1800px] mx-auto h-full grid grid-cols-12 gap-3 p-3">
@@ -440,9 +664,19 @@ export function ActionDraftPhase() {
             </div>
 
             {/* Code Grid */}
-            <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
-              <div className="text-xs text-gray-400 mb-2">Code Grid</div>
-              <CodeGridView grid={currentPlayer.codeGrid} />
+            <div className={`bg-gray-800/50 rounded-lg p-3 border ${
+              getGridClickHandler() ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
+            }`}>
+              <div className="text-xs text-gray-400 mb-2">
+                Code Grid
+                {getGridClickHandler() && (
+                  <span className="ml-2 text-indigo-400 font-medium">(click a cell)</span>
+                )}
+              </div>
+              <CodeGridView
+                grid={currentPlayer.codeGrid}
+                onCellClick={getGridClickHandler()}
+              />
             </div>
 
             {/* Tech Debt Buffer */}
@@ -460,16 +694,33 @@ export function ActionDraftPhase() {
             </div>
 
             {/* Held App Cards */}
-            <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div className={`bg-gray-800/50 rounded-lg p-3 border ${
+              freeActionMode?.type === 'publish-select-card' ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
+            }`}>
               <div className="text-xs text-gray-400 mb-2">
                 Held App Cards ({currentPlayer.heldAppCards.length}/3)
+                {freeActionMode?.type === 'publish-select-card' && (
+                  <span className="ml-2 text-indigo-400 font-medium">(click to select)</span>
+                )}
               </div>
               {currentPlayer.heldAppCards.length === 0 ? (
                 <p className="text-gray-600 text-xs">No app cards yet</p>
               ) : (
                 <div className="space-y-2">
                   {currentPlayer.heldAppCards.map((card) => (
-                    <AppCardView key={card.id} card={card} compact />
+                    <AppCardView
+                      key={card.id}
+                      card={card}
+                      compact={freeActionMode?.type !== 'publish-select-card'}
+                      isSelected={
+                        freeActionMode?.type === 'publish-place' && freeActionMode.card.id === card.id
+                      }
+                      onClick={
+                        freeActionMode?.type === 'publish-select-card'
+                          ? () => handlePublishSelectCard(card)
+                          : undefined
+                      }
+                    />
                   ))}
                 </div>
               )}
@@ -506,6 +757,7 @@ export function ActionDraftPhase() {
                 </div>
                 {currentPlayer.leader.leaderSide.power && (
                   <button
+                    onClick={handleLeaderPowerClick}
                     className={`mt-2 w-full text-xs px-2 py-1 rounded font-medium transition-colors ${
                       currentPlayer.leaderPowerUsed
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -513,7 +765,7 @@ export function ActionDraftPhase() {
                     }`}
                     disabled={currentPlayer.leaderPowerUsed}
                   >
-                    {currentPlayer.leaderPowerUsed ? 'Power Used' : 'Use Power'}
+                    {currentPlayer.leaderPowerUsed ? 'Power Used' : `Use Power: ${currentPlayer.leader.leaderSide.power.name}`}
                   </button>
                 )}
               </div>
@@ -744,24 +996,77 @@ export function ActionDraftPhase() {
 
           {/* Right: Free actions + End Turn */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Stub free action buttons — Task 30 will expand these */}
-            <Tooltip content="Publish an app from your held cards" position="top">
+            {/* Publish App — agency only */}
+            <Tooltip
+              content={
+                currentPlayer.corporationStyle !== 'agency'
+                  ? 'Agency corporations only'
+                  : currentPlayer.heldAppCards.length === 0
+                    ? 'No held app cards'
+                    : 'Publish an app from your held cards'
+              }
+              position="top"
+            >
               <button
-                className="px-3 py-2 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!isMyTurn || currentPlayer.heldAppCards.length === 0}
+                onClick={handlePublishAppClick}
+                className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  freeActionMode?.type === 'publish-select-card' || freeActionMode?.type === 'publish-place'
+                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
+                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                }`}
+                disabled={!canPublish}
               >
                 Publish App
               </button>
             </Tooltip>
 
-            <Tooltip content="Commit code tokens from the pool to your grid" position="top">
+            {/* Commit Code — both corp types */}
+            <Tooltip
+              content={
+                currentPlayer.commitCodeUsedThisRound
+                  ? 'Already used this round'
+                  : currentPlayer.corporationStyle === 'agency'
+                    ? 'Remove a token from your grid'
+                    : 'Clear a line of matching tokens for $1 + MAU'
+              }
+              position="top"
+            >
               <button
-                className="px-3 py-2 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!isMyTurn || currentPlayer.commitCodeUsedThisRound}
+                onClick={handleCommitCodeClick}
+                className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  freeActionMode?.type === 'commit-agency' || freeActionMode?.type === 'commit-product-start' || freeActionMode?.type === 'commit-product-direction'
+                    ? 'bg-orange-600 text-white ring-2 ring-orange-400'
+                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                }`}
+                disabled={!canCommit}
               >
                 Commit Code
               </button>
             </Tooltip>
+
+            {/* Leader Power — once per game */}
+            {currentPlayer.leader?.leaderSide.power && (
+              <Tooltip
+                content={
+                  currentPlayer.leaderPowerUsed
+                    ? 'Already used (once per game)'
+                    : `${currentPlayer.leader.leaderSide.power.name}: ${currentPlayer.leader.leaderSide.power.description}`
+                }
+                position="top"
+              >
+                <button
+                  onClick={handleLeaderPowerClick}
+                  className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    currentPlayer.leaderPowerUsed
+                      ? 'bg-gray-700 text-gray-500'
+                      : 'bg-yellow-700 hover:bg-yellow-600 text-yellow-100'
+                  }`}
+                  disabled={!canUseLeaderPower}
+                >
+                  Leader Power
+                </button>
+              </Tooltip>
+            )}
 
             {/* End Turn */}
             <button
@@ -789,6 +1094,45 @@ export function ActionDraftPhase() {
           (e) => e.id === pendingClaim?.engineerId,
         )}
       />
+
+      {/* ===== PUBLISH RESULT OVERLAY ===== */}
+      <AnimatePresence>
+        {freeActionMode?.type === 'publish-result' && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
+            onClick={cancelFreeAction}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="bg-gray-800 border border-gray-600 rounded-xl p-6 text-center max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-2xl mb-2">
+                {'★'.repeat(freeActionMode.stars)}{'☆'.repeat(5 - freeActionMode.stars)}
+              </div>
+              <div className="text-lg font-bold text-white mb-1">
+                {freeActionMode.card.name} Published!
+              </div>
+              <div className="text-sm text-gray-300 mb-4">
+                <span className="text-yellow-400 font-bold">{freeActionMode.vp} VP</span>
+                {' + '}
+                <span className="text-green-400 font-bold">${freeActionMode.money}</span>
+              </div>
+              <button
+                onClick={cancelFreeAction}
+                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+              >
+                OK
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ===== DEVELOP FEATURES TOKEN PICKER ===== */}
       <AnimatePresence>
