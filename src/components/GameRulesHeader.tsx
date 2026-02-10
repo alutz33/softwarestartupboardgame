@@ -176,11 +176,11 @@ function PhaseCard({ number, name, note, description, subsections }: PhaseCardPr
 
 // Main component
 
-export function GameRulesHeader() {
-  const [isExpanded, setIsExpanded] = useState(false);
+export function GameRulesHeader({ defaultExpanded = false }: { defaultExpanded?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-700/60 bg-gray-900/95 backdrop-blur">
+    <header className="border-b border-gray-700/60 bg-gray-900/95">
       <div className="mx-auto max-w-6xl px-4">
         {/* Header Bar */}
         <button

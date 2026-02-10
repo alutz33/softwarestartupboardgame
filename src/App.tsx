@@ -55,9 +55,12 @@ function App() {
     }
   };
 
+  // Hide standalone rules header during planning phase (rules button is in the turn banner)
+  const showRulesHeader = phase !== 'planning';
+
   return (
     <div className="min-h-screen bg-gray-900">
-      <GameRulesHeader />
+      {showRulesHeader && <GameRulesHeader />}
       {renderPhase()}
     </div>
   );

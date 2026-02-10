@@ -11,5 +11,16 @@ export { MilestoneTracker } from './MilestoneTracker';
 export { WinCondition, ScoreBreakdown } from './WinCondition';
 export { CatchUpIndicator, DraftOrderBadge } from './CatchUpIndicator';
 export { TechDebtWarning, MiniDebtIndicator } from './TechDebtWarning';
-export { ActionSlotIndicator, ActionSlotsLegend } from './ActionSlotIndicator';
+export { ActionSlotIndicator } from './ActionSlotIndicator';
 export { Tooltip } from './Tooltip';
+
+// Extracted planning components
+export { ProductionTrackVisual, ProductionTracksPanel } from './ProductionTrackVisual';
+export { QuarterlyThemeTracker } from './QuarterlyThemeTracker';
+export { ActionSpaceCard } from './ActionSpaceCard';
+export { EngineerToken } from './EngineerToken';
+export { PowerBreakdownTooltipContent, calculatePowerBreakdown } from './PowerBreakdown';
+export { AiAugmentationModal } from './AiAugmentationModal';
+export { HelpIcon } from './HelpIcon';
+export { ActionPreviewPopover } from './ActionPreviewPopover';
+export { SuggestedActionsBanner } from './SuggestedActionsBanner';

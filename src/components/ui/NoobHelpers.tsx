@@ -89,7 +89,6 @@ export function ActionPreview({ player, actionType, engineer, useAi = false }: A
   const action = ACTION_SPACES.find(a => a.id === actionType);
   if (!action) return null;
 
-  // Calculate expected changes
   const changes = calculateActionChanges(player, actionType, engineer, useAi);
 
   return (
@@ -98,8 +97,27 @@ export function ActionPreview({ player, actionType, engineer, useAi = false }: A
       animate={{ opacity: 1, scale: 1 }}
       className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-3"
     >
+      <ActionPreviewContent changes={changes} actionName={action.name} />
+    </motion.div>
+  );
+}
+
+interface ActionChanges {
+  mau: number;
+  revenue: number;
+  rating: number;
+  money: number;
+  techDebt: number;
+  serverCapacity: number;
+  aiCapacity: number;
+  scoreImpact: number;
+}
+
+export function ActionPreviewContent({ changes, actionName }: { changes: ActionChanges; actionName: string }) {
+  return (
+    <>
       <div className="text-xs text-blue-400 font-semibold mb-2">
-        EXPECTED OUTCOME: {action.name}
+        EXPECTED OUTCOME: {actionName}
       </div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
@@ -157,7 +175,6 @@ export function ActionPreview({ player, actionType, engineer, useAi = false }: A
         )}
       </div>
 
-      {/* Score impact */}
       <div className="mt-2 pt-2 border-t border-blue-500/30">
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Score Impact:</span>
@@ -166,11 +183,11 @@ export function ActionPreview({ player, actionType, engineer, useAi = false }: A
           </span>
         </div>
       </div>
-    </motion.div>
+    </>
   );
 }
 
-function calculateActionChanges(
+export function calculateActionChanges(
   player: Player,
   actionType: ActionType,
   engineer?: HiredEngineer,
@@ -506,41 +523,62 @@ export function YourStats({ player }: YourStatsProps) {
 // QUICK ACTION TIPS
 // ============================================
 
+export interface ActionTip {
+  text: string;
+  recommendedActions: ActionType[];
+}
+
+export function generateActionTips(player: Player): ActionTip[] {
+  const tips: ActionTip[] = [];
+  const debtLevel = getTechDebtLevel(player.resources.techDebt);
+
+  if (debtLevel.blocksDevelopment) {
+    tips.push({ text: 'CRITICAL: Use Pay Down Debt to unlock Develop Features!', recommendedActions: ['pay-down-debt'] });
+  } else if (player.resources.techDebt >= 8) {
+    tips.push({ text: `HIGH DEBT: ${debtLevel.powerPenalty} power penalty! Pay down debt!`, recommendedActions: ['pay-down-debt', 'optimize-code'] });
+  } else if (player.resources.techDebt >= 4) {
+    tips.push({ text: `Rising debt: ${debtLevel.powerPenalty} power penalty. Consider cleanup`, recommendedActions: ['pay-down-debt', 'optimize-code'] });
+  }
+  if (player.metrics.mau > player.resources.serverCapacity * 80) {
+    tips.push({ text: 'Near capacity: Upgrade Servers to handle growth', recommendedActions: ['upgrade-servers'] });
+  }
+  if (player.resources.aiCapacity === 0 && player.resources.money >= 15) {
+    tips.push({ text: 'No AI capacity: Research AI for +2 power per engineer', recommendedActions: ['research-ai'] });
+  }
+  if (player.metrics.rating < 4) {
+    tips.push({ text: 'Low rating: Optimize Code or reduce monetization', recommendedActions: ['optimize-code'] });
+  }
+  if (player.strategy?.funding === 'vc-heavy' && player.metrics.mau < 3000) {
+    tips.push({ text: 'VC wants growth: Focus on Marketing or Development', recommendedActions: ['marketing', 'develop-features'] });
+  }
+  if (player.strategy?.funding === 'bootstrapped' && player.metrics.revenue < 500) {
+    tips.push({ text: 'Revenue matters 2x: Consider Monetization actions', recommendedActions: ['monetization'] });
+  }
+
+  if (tips.length === 0) {
+    tips.push({ text: 'You\'re doing well! Balance growth and stability', recommendedActions: [] });
+  }
+
+  return tips;
+}
+
+export function getRecommendedActions(player: Player): Set<ActionType> {
+  const tips = generateActionTips(player);
+  const actions = new Set<ActionType>();
+  for (const tip of tips) {
+    for (const a of tip.recommendedActions) {
+      actions.add(a);
+    }
+  }
+  return actions;
+}
+
 interface ActionTipsProps {
   player: Player;
 }
 
 export function ActionTips({ player }: ActionTipsProps) {
-  const tips: string[] = [];
-  const debtLevel = getTechDebtLevel(player.resources.techDebt);
-
-  // Generate contextual tips based on debt
-  if (debtLevel.blocksDevelopment) {
-    tips.push('CRITICAL: Use Pay Down Debt to unlock Develop Features!');
-  } else if (player.resources.techDebt >= 8) {
-    tips.push(`HIGH DEBT: ${debtLevel.powerPenalty} power penalty! Pay down debt!`);
-  } else if (player.resources.techDebt >= 4) {
-    tips.push(`Rising debt: ${debtLevel.powerPenalty} power penalty. Consider cleanup`);
-  }
-  if (player.metrics.mau > player.resources.serverCapacity * 80) {
-    tips.push('Near capacity: Upgrade Servers to handle growth');
-  }
-  if (player.resources.aiCapacity === 0 && player.resources.money >= 15) {
-    tips.push('No AI capacity: Research AI for +2 power per engineer');
-  }
-  if (player.metrics.rating < 4) {
-    tips.push('Low rating: Optimize Code or reduce monetization');
-  }
-  if (player.strategy?.funding === 'vc-heavy' && player.metrics.mau < 3000) {
-    tips.push('VC wants growth: Focus on Marketing or Development');
-  }
-  if (player.strategy?.funding === 'bootstrapped' && player.metrics.revenue < 500) {
-    tips.push('Revenue matters 2x: Consider Monetization actions');
-  }
-
-  if (tips.length === 0) {
-    tips.push('You\'re doing well! Balance growth and stability');
-  }
+  const tips = generateActionTips(player);
 
   return (
     <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
@@ -551,7 +589,7 @@ export function ActionTips({ player }: ActionTipsProps) {
         {tips.slice(0, 3).map((tip, i) => (
           <li key={i} className="text-xs text-gray-300 flex items-start gap-2">
             <span className="text-yellow-500">•</span>
-            <span>{tip}</span>
+            <span>{tip.text}</span>
           </li>
         ))}
       </ul>

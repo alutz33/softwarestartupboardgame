@@ -50,7 +50,7 @@ export function Tooltip({ content, children, position = 'top', delay = 200 }: To
           className={`absolute z-50 ${positionClasses[position]} pointer-events-none`}
           role="tooltip"
         >
-          <span className="block bg-gray-700 text-gray-100 text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 whitespace-nowrap max-w-xs">
+          <span className="block bg-gray-700 text-gray-100 text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 max-w-xs">
             {typeof content === 'string' ? (
               <span className="whitespace-pre-line">{content}</span>
             ) : (

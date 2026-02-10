@@ -18,6 +18,7 @@ import type {
   SprintPlayerState,
   DraftPhase,
   PlanningMode,
+  SequentialDraftState,
 } from '../types';
 import {
   TOTAL_QUARTERS,
@@ -50,6 +51,34 @@ import { shuffleThemes, getThemeForRound } from '../data/quarters';
 import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
+
+// Build snake draft pick order: lowest MAU picks first, then reverses
+// e.g., for 3 players sorted by MAU: [P1, P2, P3, P3, P2, P1, P1, P2, P3, ...]
+function buildSnakePickOrder(players: Player[]): string[] {
+  const sorted = [...players].sort((a, b) => a.metrics.mau - b.metrics.mau);
+  const ids = sorted.map(p => p.id);
+  const reversed = [...ids].reverse();
+  // Build enough rounds to cover max possible picks (players * max engineers each)
+  const maxPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
+  const rounds = Math.ceil(maxPicks / ids.length) + 1;
+  const order: string[] = [];
+  for (let i = 0; i < rounds; i++) {
+    order.push(...(i % 2 === 0 ? ids : reversed));
+  }
+  return order;
+}
+
+function buildSequentialDraft(players: Player[]): SequentialDraftState {
+  const totalPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
+  return {
+    pickOrder: buildSnakePickOrder(players),
+    currentPickerIndex: 0,
+    picksPerRound: totalPicks,
+    picksCompleted: 0,
+    isComplete: false,
+    timeoutSeconds: 0,
+  };
+}
 
 // Helper function to check and claim milestones
 function checkMilestones(
@@ -614,6 +643,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             draftPhase: 'complete' as DraftPhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
+            ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(finalPlayers) } : {}),
           },
         };
       }
@@ -712,6 +742,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             draftPhase: 'complete' as DraftPhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
+            ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(finalPlayers) } : {}),
           },
         };
       };
@@ -1038,6 +1069,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             phase: 'planning' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
+            ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersReady) } : {}),
           },
         };
       }
@@ -1182,6 +1214,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           bidResults,
           currentBids: new Map(),
           occupiedActions: new Map(), // Reset for new planning phase
+          ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersWithReadyReset) } : {}),
         },
       };
     });
@@ -1331,6 +1364,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             phase: 'planning' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
+            ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersWithReadyReset) } : {}),
           },
         };
       }
