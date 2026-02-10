@@ -87,6 +87,44 @@ function buildSequentialDraft(players: Player[]): SequentialDraftState {
   };
 }
 
+// Compute a player's running VP total (for snake draft ordering).
+// Lowest VP picks first, giving trailing players catch-up opportunities.
+function getPlayerVP(player: Player): number {
+  let vp = 0;
+  // VP from published apps
+  for (const app of player.publishedApps) {
+    vp += app.vpEarned;
+  }
+  // VP from IPO / acquisition actions
+  vp += player.ipoBonusScore || 0;
+  // VP from production tracks
+  vp += player.productionTracks.mauProduction;
+  vp += player.productionTracks.revenueProduction * 2;
+  return vp;
+}
+
+// Build snake draft pick order sorted by VP (lowest first).
+// Same algorithm as buildSnakePickOrder but using VP instead of MAU.
+function buildSnakePickOrderByVP(players: Player[]): string[] {
+  const sorted = [...players].sort((a, b) => getPlayerVP(a) - getPlayerVP(b));
+  const ids = sorted.map(p => p.id);
+  const reversed = [...ids].reverse();
+  const maxPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
+  const rounds = Math.ceil(maxPicks / ids.length) + 1;
+  const order: string[] = [];
+  for (let i = 0; i < rounds; i++) {
+    order.push(...(i % 2 === 0 ? ids : reversed));
+  }
+  return order;
+}
+
+// Interactive actions that require UI interaction (mini-game or token placement).
+// All other actions resolve immediately when an engineer is placed.
+const INTERACTIVE_ACTIONS: ActionType[] = [
+  'develop-features',
+  'optimize-code',
+];
+
 // Helper function to check and claim milestones
 function checkMilestones(
   milestones: Milestone[],
@@ -214,6 +252,11 @@ interface GameStore extends GameState {
   // Sequential action draft
   claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => void;
   advanceSequentialDraft: () => void;
+
+  // Action Draft (immediate resolution)
+  startActionDraft: () => void;
+  endTurn: () => void;
+  completeInteractiveAction: () => void;
 
   // Grid redesign: App and code actions
   publishApp: (playerId: string, cardId: string, row: number, col: number) => void;
@@ -2928,13 +2971,314 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   // ============================================
-  // SEQUENTIAL ACTION DRAFT
+  // SEQUENTIAL ACTION DRAFT (legacy — kept for backwards compatibility)
   // ============================================
 
   claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => {
     const state = get();
 
-    // Only works in sequential planning mode
+    // -------------------------------------------------------
+    // NEW: Action-Draft mode (immediate resolution)
+    // -------------------------------------------------------
+    if (state.phase === 'action-draft') {
+      const turnState = state.roundState.turnState;
+      if (!turnState) return;
+
+      // Build the snake order so we can find the current player
+      const snakeOrder = buildSnakePickOrderByVP(state.players);
+
+      // Validate it's this player's turn
+      const currentPickerId = snakeOrder[turnState.currentPlayerIndex];
+      if (currentPickerId !== playerId) return;
+
+      // Delegate to the existing assignEngineer logic (place the engineer)
+      get().assignEngineer(playerId, engineerId, actionType, useAi);
+
+      // After placing, resolve the action or start a mini-game
+      if (INTERACTIVE_ACTIONS.includes(actionType)) {
+        // Interactive: set turnState to mini-game and let the UI drive completion
+        set((s) => ({
+          roundState: {
+            ...s.roundState,
+            turnState: {
+              ...s.roundState.turnState!,
+              phase: 'mini-game' as const,
+              pendingAction: actionType,
+            },
+          },
+        }));
+      } else {
+        // Non-interactive: resolve the action inline immediately
+        set((s) => ({
+          roundState: {
+            ...s.roundState,
+            turnState: {
+              ...s.roundState.turnState!,
+              phase: 'resolving' as const,
+              pendingAction: actionType,
+            },
+          },
+        }));
+
+        // Resolve the non-interactive action for this single engineer
+        set((s) => {
+          const player = s.players.find(p => p.id === playerId);
+          if (!player) return s;
+
+          const engineer = player.engineers.find(e => e.id === engineerId);
+          if (!engineer) return s;
+
+          const actionSpace = getActionSpace(actionType);
+
+          // ---- CALCULATE TOTAL POWER (same logic as resolveActions) ----
+          let effectiveUseAi = useAi;
+          if (engineer.trait === 'ai-skeptic') {
+            effectiveUseAi = false;
+          }
+
+          let totalPower = engineer.power;
+
+          if (effectiveUseAi) {
+            totalPower += AI_POWER_BONUS;
+          }
+
+          const specialtyBonus = getSpecialtyBonus(engineer.specialty, actionType);
+          totalPower += specialtyBonus;
+
+          // Equity-Hungry trait
+          if (engineer.trait === 'equity-hungry' && engineer.roundsRetained >= 2) {
+            totalPower += 1;
+          }
+
+          // Leader passive: enterprise-culture
+          if (player.leader?.leaderSide.passive.id === 'enterprise-culture' &&
+              actionType === 'develop-features') {
+            totalPower += 1;
+          }
+
+          // Persona engineer traits affecting power
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Flat Hierarchy') {
+            const engineersOnSameAction = player.plannedActions.filter(
+              a => a.actionType === actionType
+            ).length;
+            if (engineersOnSameAction === 1) {
+              totalPower += 2;
+            }
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile') {
+            if (actionType === 'research-ai') totalPower += 2;
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Researcher') {
+            if (actionType === 'research-ai') {
+              totalPower += specialtyBonus; // double specialty
+            } else {
+              totalPower -= specialtyBonus; // remove specialty for non-AI
+            }
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Alignment Researcher') {
+            if (actionType === 'research-ai') totalPower += 2;
+            if (player.resources.aiCapacity > 6) totalPower = Math.max(0, totalPower - 1);
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Protocol Purist') {
+            if (actionType === 'pay-down-debt') totalPower += 1;
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Resilience Architect') {
+            if (actionType === 'upgrade-servers') totalPower += 1;
+          }
+
+          // Tech debt power penalty
+          const currentDebtLevel = getTechDebtLevel(player.resources.techDebt);
+          if (actionType !== 'pay-down-debt') {
+            totalPower = Math.max(0, totalPower + currentDebtLevel.powerPenalty);
+          }
+
+          // ---- BUILD UPDATED PLAYER STATE ----
+          let newResources = { ...player.resources };
+          let newMetrics = { ...player.metrics };
+          let newProduction = { ...player.productionTracks };
+
+          // Generate tech debt from AI usage
+          if (effectiveUseAi) {
+            let aiDebt = getAiDebt(engineer.level);
+            if (player.strategy?.tech === 'ai-first') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (player.leader?.leaderSide.passive.id === 'efficient-ai') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (player.leader?.leaderSide.passive.id === 'alignment-tax') {
+              aiDebt = 0;
+              newMetrics.rating = Math.max(1, newMetrics.rating - 1);
+            }
+            if (engineer.isPersona && engineer.personaTrait?.name === 'Decentralist') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
+              aiDebt = 0;
+            }
+            // Volatile trait: AI usage adds +1 extra debt
+            if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile' && effectiveUseAi) {
+              newResources.techDebt += 1;
+            }
+            newResources.techDebt += aiDebt;
+          }
+
+          // Parallel Processor: Research AI gives +1 server capacity
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Parallel Processor') {
+            if (actionType === 'research-ai') newResources.serverCapacity += 1;
+          }
+
+          // Track for Community Manager / Admiral's Discipline
+          const ratingBeforeAction = newMetrics.rating;
+          const hasCommunityManager = engineer.isPersona && engineer.personaTrait?.name === 'Community Manager';
+          const debtBeforeAction = newResources.techDebt;
+          const hasAdmiralsDiscipline = engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline";
+
+          // ---- APPLY ACTION EFFECTS ----
+          switch (actionType) {
+            case 'pay-down-debt': {
+              let debtReduction = 2;
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
+                debtReduction += 1;
+              }
+              newResources.techDebt = Math.max(0, newResources.techDebt - debtReduction);
+              break;
+            }
+
+            case 'upgrade-servers': {
+              if (newResources.money >= 10) {
+                newResources.money -= 10;
+                newResources.serverCapacity += 5;
+              }
+              break;
+            }
+
+            case 'research-ai': {
+              if (newResources.money >= 15) {
+                newResources.money -= 15;
+                newResources.aiCapacity += 2;
+                if (player.leader?.leaderSide.passive.id === 'gpu-royalties') {
+                  newResources.aiCapacity += 1;
+                }
+              }
+              break;
+            }
+
+            case 'marketing': {
+              const marketingCost = hasAbility(player, 'marketing-discount') ? 10 : 20;
+              if (newResources.money >= marketingCost) {
+                newResources.money -= marketingCost;
+                let mauGain = (actionSpace.effect.mauChange || 200) * totalPower;
+                if (player.strategy?.funding === 'vc-heavy') {
+                  mauGain += (actionSpace.effect.mauChange || 200) * 2;
+                }
+                mauGain = Math.round(mauGain * newMetrics.rating / 5);
+                newMetrics.mau += mauGain;
+                newMetrics.rating = Math.min(10, newMetrics.rating + (actionSpace.effect.ratingChange || 0));
+                if (player.leader?.leaderSide.passive.id === 'trust-safety') {
+                  newMetrics.rating = Math.min(10, newMetrics.rating + 1);
+                }
+                if (engineer.isPersona &&
+                    (engineer.personaTrait?.name === 'Growth Hacker' ||
+                     engineer.personaTrait?.name === 'Content Algorithm')) {
+                  newProduction.mauProduction = Math.min(
+                    PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction + 1
+                  );
+                }
+              }
+              break;
+            }
+
+            case 'monetization': {
+              let revenue = Math.round(
+                (actionSpace.effect.revenueChange || 300) * totalPower * (newMetrics.mau / 1000)
+              );
+              if (hasAbility(player, 'revenue-boost')) {
+                revenue = Math.round(revenue * 1.2);
+              }
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Enterprise Sales') {
+                revenue += 5;
+              }
+              newMetrics.revenue += revenue;
+              newMetrics.rating = Math.max(1, newMetrics.rating + (actionSpace.effect.ratingChange || 0));
+              newProduction.revenueProduction = Math.min(
+                PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                newProduction.revenueProduction + (actionSpace.effect.revenueProductionDelta || 0)
+              );
+              if (player.leader?.leaderSide.passive.id === 'saas-compounding') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction + 1
+                );
+              }
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Monetizer') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction + 1
+                );
+              }
+              break;
+            }
+
+            default:
+              break;
+          }
+
+          // Post-action trait guards
+          if (hasCommunityManager && newMetrics.rating < ratingBeforeAction) {
+            newMetrics.rating = ratingBeforeAction;
+          }
+          if (hasAdmiralsDiscipline && newResources.techDebt > debtBeforeAction) {
+            newResources.techDebt = debtBeforeAction;
+          }
+
+          // Leader passive: hype-machine
+          if (player.leader?.leaderSide.passive.id === 'hype-machine') {
+            const variance = Math.floor(Math.random() * 401) - 200;
+            newMetrics.mau = Math.max(0, newMetrics.mau + 500 + variance);
+          }
+
+          // Clamp
+          newProduction.mauProduction = Math.max(0, Math.min(
+            PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction
+          ));
+          newProduction.revenueProduction = Math.max(0, Math.min(
+            PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction
+          ));
+          newMetrics.rating = Math.max(1, Math.min(10, Math.round(newMetrics.rating)));
+
+          // Update the player in the players array
+          const updatedPlayers = s.players.map(p => {
+            if (p.id !== playerId) return p;
+            return {
+              ...p,
+              resources: newResources,
+              metrics: newMetrics,
+              productionTracks: newProduction,
+            };
+          });
+
+          return {
+            players: updatedPlayers,
+            roundState: {
+              ...s.roundState,
+              turnState: {
+                ...s.roundState.turnState!,
+                phase: 'free-actions' as const,
+                pendingAction: undefined,
+              },
+            },
+          };
+        });
+
+        // Auto-advance: call endTurn after immediate resolution
+        get().endTurn();
+      }
+
+      return;
+    }
+
+    // -------------------------------------------------------
+    // LEGACY: Sequential planning mode (kept for backwards compatibility)
+    // -------------------------------------------------------
     if (state.planningMode !== 'sequential') return;
 
     const draft = state.roundState.sequentialDraft;
@@ -3051,6 +3395,117 @@ export const useGameStore = create<GameStore>((set, get) => ({
           sequentialDraft: {
             ...draft,
             currentPickerIndex: nextIndex,
+          },
+        },
+      };
+    });
+  },
+
+  // ============================================
+  // ACTION DRAFT: Immediate Resolution Mode
+  // ============================================
+
+  startActionDraft: () => {
+    set((state) => {
+      return {
+        phase: 'action-draft' as GamePhase,
+        roundState: {
+          ...state.roundState,
+          phase: 'action-draft' as GamePhase,
+          turnState: {
+            currentPlayerIndex: 0,
+            phase: 'free-actions' as const,
+          },
+        },
+      };
+    });
+  },
+
+  endTurn: () => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState) return state;
+
+      const snakeOrder = buildSnakePickOrderByVP(state.players);
+
+      // Count total engineers and total placed engineers
+      const totalEngineers = state.players.reduce(
+        (sum, p) => sum + p.engineers.length, 0
+      );
+      const placedEngineers = state.players.reduce(
+        (sum, p) => sum + p.engineers.filter(e => e.assignedAction).length, 0
+      );
+
+      // If all engineers have been placed, transition to event phase
+      if (placedEngineers >= totalEngineers) {
+        return {
+          phase: 'event' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'event' as GamePhase,
+            turnState: undefined,
+          },
+        };
+      }
+
+      // Advance to the next player in snake order
+      let nextIndex = turnState.currentPlayerIndex + 1;
+
+      // Wrap around
+      if (nextIndex >= snakeOrder.length) {
+        nextIndex = 0;
+      }
+
+      // Skip players who have no unassigned engineers
+      let attempts = 0;
+      const maxAttempts = snakeOrder.length;
+      while (attempts < maxAttempts) {
+        const nextPlayerId = snakeOrder[nextIndex];
+        const nextPlayer = state.players.find(p => p.id === nextPlayerId);
+        const hasUnassigned = nextPlayer?.engineers.some(e => !e.assignedAction);
+
+        if (hasUnassigned) break;
+
+        nextIndex = (nextIndex + 1) % snakeOrder.length;
+        attempts++;
+      }
+
+      // If nobody has unassigned engineers, transition to event phase
+      if (attempts >= maxAttempts) {
+        return {
+          phase: 'event' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'event' as GamePhase,
+            turnState: undefined,
+          },
+        };
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          turnState: {
+            currentPlayerIndex: nextIndex,
+            phase: 'free-actions' as const,
+          },
+        },
+      };
+    });
+  },
+
+  completeInteractiveAction: () => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game') return state;
+
+      return {
+        roundState: {
+          ...state.roundState,
+          turnState: {
+            ...turnState,
+            phase: 'free-actions' as const,
+            pendingAction: undefined,
           },
         },
       };
