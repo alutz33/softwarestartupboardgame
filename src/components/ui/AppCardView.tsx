@@ -1,12 +1,7 @@
 import { motion } from 'framer-motion';
-import type { AppCard, TokenColor } from '../../types';
-
-const TOKEN_COLORS_MAP: Record<TokenColor, string> = {
-  green: 'bg-green-500',
-  orange: 'bg-orange-500',
-  blue: 'bg-blue-500',
-  purple: 'bg-purple-500',
-};
+import type { AppCard } from '../../types';
+import { getStarRating } from '../../data/appCards';
+import { TOKEN_COLORS_MAP } from './tokenConstants';
 
 const TIER_COLORS: Record<string, string> = {
   small: 'border-green-600',
@@ -30,7 +25,7 @@ export function AppCardView({
   matchedTokens,
 }: AppCardViewProps) {
   const stars = matchedTokens !== undefined
-    ? getStarPreview(card, matchedTokens)
+    ? getStarRating(card, matchedTokens)
     : null;
 
   return (
@@ -78,11 +73,4 @@ export function AppCardView({
       )}
     </motion.div>
   );
-}
-
-function getStarPreview(card: AppCard, matched: number): number {
-  for (let stars = 4; stars >= 0; stars--) {
-    if (matched >= card.starThresholds[stars]) return stars + 1;
-  }
-  return 0;
 }

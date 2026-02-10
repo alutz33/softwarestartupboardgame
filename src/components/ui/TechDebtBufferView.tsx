@@ -1,12 +1,6 @@
 import { motion } from 'framer-motion';
-import type { TechDebtBuffer, TokenColor } from '../../types';
-
-const TOKEN_COLORS_MAP: Record<TokenColor, string> = {
-  green: 'bg-green-500',
-  orange: 'bg-orange-500',
-  blue: 'bg-blue-500',
-  purple: 'bg-purple-500',
-};
+import type { TechDebtBuffer } from '../../types';
+import { TOKEN_COLORS_MAP } from './tokenConstants';
 
 interface TechDebtBufferViewProps {
   buffer: TechDebtBuffer;

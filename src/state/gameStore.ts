@@ -2687,6 +2687,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           money: p.resources.money + moneyGain,
         },
         hasRecruiterBonus: false, // Reset recruiter bonus
+        commitCodeUsedThisRound: false, // Reset commit code flag
       };
     });
 
@@ -3071,7 +3072,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const stars = getStarRating(card, matched);
 
     // Calculate VP and money based on star fraction
-    const vpEarned = Math.floor(card.maxVP * (stars / 5));
+    const vpEarned = Math.max(1, Math.floor(card.maxVP * (stars / 5)));
     const moneyEarned = Math.floor(card.maxMoney * (stars / 5));
 
     // Clear matched pattern cells from grid
@@ -3173,21 +3174,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }),
       }));
     } else if (style === 'product') {
-      // Product: validate 3-same-color pattern in direction, clear and give $1
+      // Product: validate 3-same-color or 4-all-different-color pattern in direction, clear and give $1 + MAU
       const requiredCount = count || 3;
       const cells = player.codeGrid.cells;
       const startColor = cells[row]?.[col];
       if (startColor === null || startColor === undefined) return;
 
-      // Validate all tokens in the line are same color
-      const positions: Array<{ r: number; c: number }> = [];
+      // Collect tokens in the line
+      const tokens: Array<{ r: number; c: number; color: string }> = [];
       for (let i = 0; i < requiredCount; i++) {
         const r = direction === 'col' ? row + i : row;
         const c = direction === 'row' ? col + i : col;
         if (r >= cells.length || c >= cells[0].length) return;
-        if (cells[r][c] !== startColor) return;
-        positions.push({ r, c });
+        const cellColor = cells[r][c];
+        if (cellColor === null || cellColor === undefined) return;
+        tokens.push({ r, c, color: cellColor });
       }
+
+      // Validate: all same color (count=3) or 1 of each (count=4)
+      const colors = new Set(tokens.map(t => t.color));
+      const valid = (requiredCount === 3 && colors.size === 1) || (requiredCount === 4 && colors.size === 4);
+      if (!valid) return;
+
+      const positions = tokens.map(t => ({ r: t.r, c: t.c }));
 
       const newCells = cells.map(r => [...r]);
       for (const pos of positions) {
@@ -3202,6 +3211,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
             commitCodeUsedThisRound: true,
             resources: { ...p.resources, money: p.resources.money + 1 },
             codeGrid: { ...p.codeGrid, cells: newCells },
+            productionTracks: {
+              ...p.productionTracks,
+              mauProduction: Math.min(
+                p.productionTracks.mauProduction + 1,
+                20
+              ),
+            },
           };
         }),
       }));
