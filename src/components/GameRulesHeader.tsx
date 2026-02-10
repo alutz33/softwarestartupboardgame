@@ -249,9 +249,9 @@ export function GameRulesHeader({ defaultExpanded = false }: { defaultExpanded?:
 
                 {/* What's New */}
                 <CollapsibleSection
-                  title="What's New in This Edition"
+                  title="Key Features"
                   icon="✨"
-                  badge="UPDATED"
+                  badge="v2"
                   badgeVariant="success"
                   accentColor="border-green-500"
                 >
@@ -268,26 +268,9 @@ export function GameRulesHeader({ defaultExpanded = false }: { defaultExpanded?:
                             {feature.items.map((item, i) => (
                               <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
                                 <span className="text-green-400">•</span>
-                                {'power' in item && (
-                                  <span>
-                                    <strong className="text-blue-300">{item.power}</strong> ({item.funding}): {item.effect}
-                                  </span>
-                                )}
-                                {'trait' in item && (
-                                  <span>
-                                    <strong className="text-yellow-300">{item.trait}</strong>: {item.effect}
-                                  </span>
-                                )}
-                                {'round' in item && (
-                                  <span>
-                                    <strong className="text-purple-300">{item.round}</strong>: {item.action}
-                                  </span>
-                                )}
-                                {'mechanic' in item && (
-                                  <span>
-                                    <strong className="text-cyan-300">{item.mechanic}</strong>: {item.effect}
-                                  </span>
-                                )}
+                                <span>
+                                  <strong className="text-cyan-300">{item.mechanic}</strong>: {item.effect}
+                                </span>
                               </li>
                             ))}
                           </ul>
@@ -393,9 +376,9 @@ export function GameRulesHeader({ defaultExpanded = false }: { defaultExpanded?:
                   </div>
                 </CollapsibleSection>
 
-                {/* Special Rules */}
+                {/* Key Mechanics */}
                 <CollapsibleSection
-                  title="Special Rules & Clarifications"
+                  title="Key Mechanics & Clarifications"
                   icon="📜"
                   accentColor="border-red-500"
                 >
@@ -412,11 +395,11 @@ export function GameRulesHeader({ defaultExpanded = false }: { defaultExpanded?:
                   </div>
                 </CollapsibleSection>
 
-                {/* House Rules */}
+                {/* Tips & Strategy */}
                 <CollapsibleSection
-                  title="Optional House Rules"
-                  icon="🏠"
-                  accentColor="border-gray-500"
+                  title="Tips & Strategy"
+                  icon="💡"
+                  accentColor="border-indigo-500"
                 >
                   <div className="space-y-2">
                     {gameRules.houseRules.rules.map((rule, idx) => (

@@ -39,6 +39,15 @@ function LeaderCardDisplay({
         className="cursor-pointer h-full"
       >
         <CardContent className="p-5">
+          {/* Portrait */}
+          <div className="flex justify-center mb-4">
+            <img
+              src={`/personas/${card.id}.png`}
+              alt={card.name}
+              className="w-28 h-36 object-cover rounded-lg border-2 border-gray-700 shadow-lg"
+            />
+          </div>
+
           {/* Name & Title */}
           <div className="text-center mb-4">
             <h3 className="text-xl font-bold text-white">{card.name}</h3>

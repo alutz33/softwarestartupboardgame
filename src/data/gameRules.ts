@@ -18,97 +18,80 @@ export const gameRules = {
   overview: {
     title: 'Overview',
     description:
-      'Ship It! is a competitive strategy board game for 2-4 players where you compete to build the most successful software startup. Balance growth, revenue, and user satisfaction while managing technical debt, racing for milestones, and blocking competitors from key actions.',
+      'Ship It! is a competitive strategy board game for 2-4 players where you build a software startup. Place code tokens on your grid, publish apps or grow users, manage engineers, and race for milestones — all while keeping tech debt under control.',
     stats: {
       players: '2-4',
-      duration: '~30 minutes',
-      rounds: '4',
+      duration: '~45 minutes',
+      rounds: '12 (3 per quarter, 4 quarters)',
     },
   },
 
   objective: {
     title: 'Objective',
     description:
-      'Build the most valuable startup by the end of 4 rounds. Your success is measured by three key metrics:',
+      'Score the most Victory Points by the end of Year 1 (4 quarters). Your strategy depends on your play style:',
     metrics: [
       {
-        name: 'MAU',
-        fullName: 'Monthly Active Users',
-        description: 'Your user base size',
+        name: 'Agency',
+        fullName: 'App Studio',
+        description: 'Publish apps by matching grid patterns to app cards for VP',
       },
       {
-        name: 'Revenue',
-        fullName: 'Revenue',
-        description: 'Money generated from your product',
+        name: 'Product',
+        fullName: 'Live Product',
+        description: 'Grow MAU via milestones + commit code lines for VP',
       },
       {
-        name: 'Rating',
-        fullName: 'Rating',
-        description: 'User satisfaction (1-10 integer scale)',
+        name: 'Both',
+        fullName: 'Shared',
+        description: 'Money converts to VP ($10 = 1 VP) + milestone bonuses',
       },
     ],
   },
 
   whatsNew: [
     {
-      title: 'Corporation Powers',
+      title: 'Code Grid System',
       badge: 'NEW',
       description:
-        'Each funding strategy now has a unique ability that provides asymmetric gameplay:',
+        'Each player has a 4x4 grid where they place colored code tokens. The grid is central to both play styles:',
       items: [
-        { power: 'Pivot', funding: 'VC-Heavy', effect: 'Change your product type once per game' },
-        { power: 'Lean Team', funding: 'Bootstrapped', effect: '20% discount on all engineer hiring' },
-        { power: 'Insider Info', funding: 'Angel-Backed', effect: 'See 2 extra engineers in each draft' },
+        { mechanic: 'Develop Features', effect: 'Pick a token from the shared pool and place it on your grid' },
+        { mechanic: 'Publish App (Agency)', effect: 'Match a pattern on your grid to an app card for star ratings and VP' },
+        { mechanic: 'Commit Code (Product)', effect: 'Lock 3 same-color or 4 all-different tokens in a line for VP + MAU production' },
+        { mechanic: 'Optimize Code', effect: 'Push-your-luck mini-game that earns grid swaps to rearrange tokens' },
       ],
     },
     {
-      title: 'Engineer Traits',
-      badge: 'NEW',
-      description: '~35% of engineers have special traits that affect gameplay:',
-      items: [
-        { trait: 'AI Skeptic', effect: 'Cannot use AI, but +1 base power' },
-        { trait: 'Equity-Hungry', effect: 'Costs +$5, but +1 power if retained 2+ rounds' },
-        { trait: 'Startup Veteran', effect: 'Immune to negative event effects' },
-        { trait: 'Night Owl', effect: '+1 power on last action assigned each round' },
-      ],
-    },
-    {
-      title: 'Late-Game Actions',
-      badge: 'NEW',
-      description: 'New high-risk/high-reward actions unlock in later rounds:',
-      items: [
-        { round: 'Round 3', action: 'Go Viral (risky marketing)' },
-        { round: 'Round 4', action: 'IPO Prep, Acquisition Target' },
-      ],
-    },
-    {
-      title: 'Event Forecasting',
-      badge: 'NEW',
-      description: "See next round's event during planning phase so you can prepare strategically!",
-    },
-    {
-      title: 'Scaled Puzzle Rewards',
+      title: 'Action Draft Phase',
       badge: 'NEW',
       description:
-        'More engineers on Optimize Code = bigger puzzle rewards (1-3 debt reduction + bonus money)',
+        'Replaces the old planning/reveal/resolution phases. Players take turns in snake draft order (lowest VP first) placing one engineer at a time. Actions resolve immediately when placed!',
     },
     {
-      title: 'Action Space Competition',
+      title: 'Two Play Styles',
+      badge: 'NEW',
       description:
-        'Some action spaces have limited slots. First player to claim a slot blocks others from using it that round. Plan carefully!',
+        'Choose App Studio (agency) or Live Product at the start. Each has different scoring, free actions, and marketing/monetization effects.',
+    },
+    {
+      title: '3 Rounds per Quarter',
+      badge: 'NEW',
+      description:
+        'Each quarter has 3 action draft rounds. Between rounds, engineers unassign and return to your pool. Events, production, and engineer drafts happen only at quarter boundaries.',
+    },
+    {
+      title: 'Free Actions',
+      description: 'Before placing an engineer each turn, you can take free actions: Publish App (agency), Commit Code, or Use Leader Power.',
     },
     {
       title: 'Catch-Up Mechanics',
       description: 'Multiple mechanisms help trailing players:',
       items: [
-        { mechanic: 'Draft Order', effect: 'Players with lowest MAU pick first in the engineer draft' },
+        { mechanic: 'Snake Draft Order', effect: 'Lowest VP picks first in the action draft' },
+        { mechanic: 'Engineer Draft', effect: 'Lowest MAU picks first when hiring engineers' },
         { mechanic: 'Income Cap', effect: 'High MAU income is capped to prevent runaway leaders' },
-        { mechanic: 'Underdog Bonus', effect: 'Players below median MAU receive +$10 per round' },
       ],
-    },
-    {
-      title: 'Milestones',
-      description: 'Race to be first to achieve key goals for permanent scoring bonuses!',
     },
   ],
 
@@ -116,142 +99,59 @@ export const gameRules = {
     title: 'Game Setup',
     steps: [
       'Select number of players (2-4)',
-      'Shuffle the event deck',
-      'Each player selects their corporation identity (see Corporation Selection)',
-      'Players receive starting resources based on their choices',
-      'Set out the 5 milestone cards (unclaimed)',
+      'Each player drafts a Leader (pick 1 of 3 persona cards dealt)',
+      'Each player chooses a Play Style: App Studio (agency) or Live Product',
+      'Players receive starting resources based on leader + balanced funding',
+      'First engineer draft begins — lowest MAU picks first',
     ],
   },
 
   gameFlow: {
     title: 'Game Flow',
-    description: 'Each round follows this sequence of phases:',
+    description: 'The game spans 4 quarters. Each quarter follows this flow:',
     phases: [
-      { name: 'Corporation Selection', note: 'Round 1 only' },
-      { name: 'Engineer Draft', note: 'lowest MAU picks first!' },
-      { name: 'Planning Phase', note: 'compete for action slots' },
-      { name: 'Reveal Phase' },
-      { name: 'Puzzle Phase', note: 'if triggered' },
-      { name: 'Resolution Phase', note: 'check milestones!' },
-      { name: 'Event Phase' },
-      { name: 'Round End' },
+      { name: 'Engineer Draft', note: 'start of each quarter' },
+      { name: 'Action Draft R1', note: 'snake order by VP' },
+      { name: 'Action Draft R2', note: 'engineers reset' },
+      { name: 'Action Draft R3', note: 'last round of quarter' },
+      { name: 'Event Phase', note: 'end of quarter only' },
+      { name: 'Quarter End', note: 'production + cleanup' },
     ],
   },
 
   phases: [
     {
       number: 1,
-      name: 'Corporation Selection',
-      note: 'Round 1 Only',
+      name: 'Leader Draft & Play Style',
+      note: 'Game Start Only',
       description:
-        "Each player makes three strategic choices that define their startup's identity:",
+        'Each player picks a leader from 3 dealt persona cards, then chooses a play style that determines how they score VP.',
       subsections: [
         {
-          title: 'Funding Strategy',
+          title: 'Play Styles',
           table: {
-            headers: ['Strategy', 'Starting Money', 'Special Bonus', 'Equity Retained', 'Unique Power'],
+            headers: ['Style', 'Scoring', 'Free Action', 'Marketing Effect', 'Monetization Effect'],
             rows: [
               {
-                Strategy: 'VC-Heavy',
-                'Starting Money': '$100',
-                'Special Bonus': 'Marketing effectiveness +50%',
-                'Equity Retained': '40%',
-                'Unique Power': 'Pivot - Change product type once per game',
+                Style: 'App Studio (Agency)',
+                Scoring: 'VP from published app star ratings',
+                'Free Action': 'Publish App: match grid pattern to app card',
+                'Marketing Effect': '+1 star bonus on next publish',
+                'Monetization Effect': '+$1 per total published star',
               },
               {
-                Strategy: 'Bootstrapped',
-                'Starting Money': '$40',
-                'Special Bonus': 'Revenue counts 2x for scoring',
-                'Equity Retained': '100%',
-                'Unique Power': 'Lean Team - 20% discount on hiring',
-              },
-              {
-                Strategy: 'Angel-Backed',
-                'Starting Money': '$70',
-                'Special Bonus': '+1 engineer capacity per round',
-                'Equity Retained': '70%',
-                'Unique Power': 'Insider Info - See +2 engineers in draft',
+                Style: 'Live Product',
+                Scoring: 'VP from MAU milestones + committed code',
+                'Free Action': 'Commit Code: lock 3-same or 4-different tokens',
+                'Marketing Effect': '+1 MAU production track',
+                'Monetization Effect': '+$1 recurring revenue per round',
               },
             ],
           },
         },
         {
-          title: 'Corporation Powers (Detailed)',
-          table: {
-            headers: ['Power', 'Funding Type', 'Effect', 'Usage'],
-            rows: [
-              {
-                Power: 'Pivot',
-                'Funding Type': 'VC-Heavy',
-                Effect: 'Change your product type (B2B / Consumer / Platform) mid-game. Affects all future growth multipliers.',
-                Usage: 'Once per game, during Planning phase',
-              },
-              {
-                Power: 'Lean Team',
-                'Funding Type': 'Bootstrapped',
-                Effect: 'All engineer hiring costs are reduced by 20%. Applied automatically to winning bids.',
-                Usage: 'Passive (always active)',
-              },
-              {
-                Power: 'Insider Info',
-                'Funding Type': 'Angel-Backed',
-                Effect: 'See 2 additional engineers in each draft round, giving you more options to bid on.',
-                Usage: 'Passive (always active)',
-              },
-            ],
-          },
-        },
-        {
-          title: 'Tech Approach',
-          table: {
-            headers: ['Approach', 'Starting AI Capacity', 'Starting Tech Debt', 'Special Bonus'],
-            rows: [
-              {
-                Approach: 'AI-First',
-                'Starting AI Capacity': '4',
-                'Starting Tech Debt': '2',
-                'Special Bonus': 'AI augmentation generates 50% less debt',
-              },
-              {
-                Approach: 'Quality-Focused',
-                'Starting AI Capacity': '1',
-                'Starting Tech Debt': '0',
-                'Special Bonus': '+1 rating at end of each round',
-              },
-              {
-                Approach: 'Move-Fast',
-                'Starting AI Capacity': '2',
-                'Starting Tech Debt': '3',
-                'Special Bonus': '+1 MAU production at start, debt accumulates faster',
-              },
-            ],
-          },
-        },
-        {
-          title: 'Product Type',
-          table: {
-            headers: ['Product', 'MAU Multiplier', 'Revenue Multiplier', 'Rating Multiplier'],
-            rows: [
-              {
-                Product: 'B2B SaaS',
-                'MAU Multiplier': '0.5x',
-                'Revenue Multiplier': '2.0x',
-                'Rating Multiplier': '0.8x',
-              },
-              {
-                Product: 'Consumer App',
-                'MAU Multiplier': '2.0x',
-                'Revenue Multiplier': '0.5x',
-                'Rating Multiplier': '1.2x',
-              },
-              {
-                Product: 'Platform Play',
-                'MAU Multiplier': '1.0x',
-                'Revenue Multiplier': '1.0x',
-                'Rating Multiplier': '1.0x',
-              },
-            ],
-          },
+          title: 'Leaders',
+          content: '18 unique persona cards, each with: a starting bonus, a once-per-game power, and an always-on passive ability. Unchosen leaders become premium engineers (Senior, 4 power) with unique traits in the engineer draft.',
         },
       ],
     },
@@ -259,22 +159,8 @@ export const gameRules = {
       number: 2,
       name: 'Engineer Draft',
       description:
-        'Engineers are the workers you\'ll assign to actions. Each round features a sealed-bid auction.',
+        'At the start of each quarter, hire engineers from a shared pool. Lowest MAU picks first (catch-up mechanic).',
       subsections: [
-        {
-          title: 'Catch-Up Draft Order',
-          highlight: true,
-          content:
-            'Players with the lowest MAU pick first! This gives trailing players a chance to catch up by securing the best engineers. Draft order is recalculated at the start of each round based on current MAU standings.',
-        },
-        {
-          title: 'Engineer Pool',
-          items: [
-            'Pool size = Number of Players + 1 + Recruiter Bonuses',
-            'Engineers are randomly generated with varying skills',
-            'Later rounds feature more senior engineers (30% seniors in Round 1 -> 60% in Round 4)',
-          ],
-        },
         {
           title: 'Engineer Types',
           table: {
@@ -288,150 +174,142 @@ export const gameRules = {
         },
         {
           title: 'Engineer Specialties',
+          content: 'Each engineer has a specialty that gives +1 power when assigned to a matching action:',
           table: {
-            headers: ['Specialty', 'Matching Actions', 'Bonus'],
+            headers: ['Specialty', 'Matching Actions'],
             rows: [
-              { Specialty: 'Frontend', 'Matching Actions': 'Develop Features, Marketing', Bonus: '+1 power' },
-              { Specialty: 'Backend', 'Matching Actions': 'Optimize Code, Upgrade Servers', Bonus: '+1 power' },
-              { Specialty: 'Fullstack', 'Matching Actions': 'Develop Features, Optimize Code', Bonus: '+1 power' },
-              { Specialty: 'DevOps', 'Matching Actions': 'Upgrade Servers, Research AI', Bonus: '+1 power' },
-              { Specialty: 'AI', 'Matching Actions': 'Research AI, Optimize Code', Bonus: '+1 power' },
+              { Specialty: 'Frontend', 'Matching Actions': 'Develop Features, Marketing' },
+              { Specialty: 'Backend', 'Matching Actions': 'Optimize Code, Upgrade Servers' },
+              { Specialty: 'Fullstack', 'Matching Actions': 'Develop Features, Optimize Code' },
+              { Specialty: 'DevOps', 'Matching Actions': 'Upgrade Servers, Research AI' },
+              { Specialty: 'AI', 'Matching Actions': 'Research AI, Optimize Code' },
             ],
           },
         },
         {
-          title: 'Engineer Traits',
-          badge: 'NEW',
-          content: 'Approximately 35% of engineers have a unique trait that provides special abilities:',
+          title: 'Engineer Traits (~35% chance)',
           table: {
-            headers: ['Trait', 'Effect', 'Strategy Tips'],
+            headers: ['Trait', 'Effect'],
             rows: [
-              {
-                Trait: 'AI Skeptic',
-                Effect: 'Cannot use AI augmentation, but has +1 base power',
-                'Strategy Tips': 'Best for quality-focused strategies; no AI debt risk',
-              },
-              {
-                Trait: 'Equity-Hungry',
-                Effect: 'Costs +$5 to hire, but gains +1 power if retained for 2+ rounds',
-                'Strategy Tips': 'Hire early for maximum value; great long-term investment',
-              },
-              {
-                Trait: 'Startup Veteran',
-                Effect: 'Immune to negative event effects',
-                'Strategy Tips': 'Protects against DDoS, breaches, competitor launches',
-              },
-              {
-                Trait: 'Night Owl',
-                Effect: '+1 power on the last action assigned each round',
-                'Strategy Tips': 'Assign to your most important action last!',
-              },
+              { Trait: 'AI Skeptic', Effect: '+1 base power, but cannot use AI augmentation' },
+              { Trait: 'Equity-Hungry', Effect: '+$5 hire cost, but +1 power if retained 2+ rounds' },
+              { Trait: 'Startup Veteran', Effect: 'Immune to negative event effects' },
+              { Trait: 'Night Owl', Effect: '+1 power on the last action assigned each round' },
             ],
           },
-          tips: [
-            { trait: 'AI Skeptic', tip: 'Ideal for players avoiding tech debt. +1 power without needing AI.' },
-            { trait: 'Equity-Hungry', tip: 'Plan to keep them! Round 1 hires get the +1 power bonus in Rounds 3-4.' },
-            { trait: 'Startup Veteran', tip: 'Insurance against bad events. One veteran protects your whole company.' },
-            { trait: 'Night Owl', tip: 'Order your action assignments carefully - save them for last for +1 power!' },
-          ],
         },
         {
-          title: 'Bidding Rules',
+          title: 'Pool Quality',
           items: [
-            'All players simultaneously submit sealed bids for each engineer',
-            'Engineers are awarded to highest bidder (earliest bid wins ties)',
-            "Money is deducted from winning player's budget",
-            'Every player is guaranteed at least one engineer (intern safety net)',
+            'Pool size = Players + 1 (plus recruiter/insider bonuses)',
+            'Q1: 30% seniors, Q2: 40%, Q3: 50%, Q4: 60%',
+            'Persona engineers (unchosen leaders) are auctioned separately',
           ],
         },
       ],
     },
     {
       number: 3,
-      name: 'Planning Phase',
+      name: 'Action Draft (3 rounds per quarter)',
       description:
-        "In this phase, players assign their engineers to action spaces. Each action has an effect on your company's metrics.",
+        'The core of each quarter. Players take turns in snake order (lowest VP first) placing engineers on action spaces. Actions resolve immediately when placed.',
       subsections: [
+        {
+          title: 'Turn Structure',
+          items: [
+            '1. Take free actions (optional): Publish App, Commit Code, or Use Leader Power',
+            '2. Select an unassigned engineer',
+            '3. Place them on an available action space',
+            '4. Action resolves immediately (or triggers mini-game for interactive actions)',
+            '5. Next player\'s turn (snake order advances)',
+          ],
+        },
         {
           title: 'Available Actions',
           table: {
-            headers: ['Action', 'Effect'],
+            headers: ['Action', 'Cost', 'Slots', 'Effect'],
             rows: [
-              { Action: 'Develop Features', Effect: '+MAU (depends on product type & engineering strength)' },
-              { Action: 'Marketing Push', Effect: '+MAU (marketing multiplier applies)' },
-              { Action: 'Monetize Users', Effect: '+Revenue (depends on user base & product type)' },
-              { Action: 'Optimize Code', Effect: '-Tech Debt (triggers puzzle phase if 2+ engineers)' },
-              { Action: 'Upgrade Servers', Effect: '+Revenue & MAU (scales with DevOps talent)' },
-              { Action: 'Research AI', Effect: '+AI capacity (AI adds +2 power per engineer)' },
+              { Action: 'Develop Features', Cost: 'Free', Slots: '3', Effect: 'Pick a token from the shared pool and place it on your grid' },
+              { Action: 'Optimize Code', Cost: 'Free', Slots: 'No limit', Effect: 'Push-your-luck mini-game: earn grid swaps to rearrange tokens' },
+              { Action: 'Pay Down Debt', Cost: 'Free', Slots: 'No limit', Effect: '-2 tech debt (always available safety valve)' },
+              { Action: 'Marketing', Cost: '$20', Slots: '1', Effect: '+MAU (scaled by power and rating). Agency: +1 star bonus. Product: +1 MAU production' },
+              { Action: 'Monetization', Cost: 'Free', Slots: '2', Effect: '+Revenue (scaled by power and MAU). Agency: +$1/published star. Product: +$1 recurring' },
+              { Action: 'Upgrade Servers', Cost: '$10', Slots: '2', Effect: '+5 server capacity' },
+              { Action: 'Research AI', Cost: '$15', Slots: '2', Effect: '+2 AI capacity' },
+              { Action: 'Hire Recruiter', Cost: '$25', Slots: '1', Effect: 'See +2 extra engineers next quarter' },
             ],
           },
         },
         {
-          title: 'Action Slots',
-          content: 'Some actions have limited slots. Players who assign first block others.',
+          title: 'Late-Game Actions',
+          table: {
+            headers: ['Action', 'Unlocks', 'Cost', 'Slots', 'Effect'],
+            rows: [
+              { Action: 'Go Viral', Unlocks: 'Q3', Cost: '$15', Slots: '1', Effect: '50/50: success = +3000 MAU + 2 MAU prod; fail = -1000 MAU' },
+              { Action: 'IPO Prep', Unlocks: 'Q4', Cost: '$50', Slots: '1', Effect: '+25 bonus VP' },
+              { Action: 'Acquisition Target', Unlocks: 'Q4', Cost: 'Free', Slots: '1', Effect: 'MAU x 0.002 instant VP; lose 50% MAU' },
+            ],
+          },
         },
-      ],
-    },
-    {
-      number: 4,
-      name: 'Reveal Phase',
-      description:
-        'Players reveal their assigned engineers. Resolve action priorities based on slots and engineer power.',
-    },
-    {
-      number: 5,
-      name: 'Puzzle Phase',
-      description:
-        'Triggered when Optimize Code has 2+ engineers. Solve the puzzle to reduce technical debt.',
-      subsections: [
         {
-          title: 'Puzzle Rewards',
+          title: 'Interactive Actions',
+          content: 'Develop Features and Optimize Code trigger interactive mini-games instead of resolving automatically. Develop Features lets you pick a token from the shared pool and place it on your grid. Optimize Code runs a push-your-luck game where successes earn grid swaps.',
+        },
+        {
+          title: 'Between Rounds (within a quarter)',
           items: [
-            'Base reward: -1 tech debt',
-            '+1 extra per additional engineer (max 3)',
-            'Bonus money for perfect clear',
+            'All engineers unassign and return to your pool',
+            'Occupied action slots reset',
+            'Per-round flags (commit code used, etc.) reset',
+            'No events, no production — just another action draft round',
           ],
         },
       ],
     },
     {
-      number: 6,
-      name: 'Resolution Phase',
-      description:
-        'Apply the effects of all actions. Update MAU, Revenue, Rating, Tech Debt, AI Capacity, etc.',
-      subsections: [
-        {
-          title: 'Milestone Check',
-          content:
-            'After resolution, check for milestone achievements. First player to reach them claims the bonus.',
-        },
-      ],
-    },
-    {
-      number: 7,
+      number: 4,
       name: 'Event Phase',
-      description: 'Draw an event card and apply its effect to all players.',
+      description: 'At the end of each quarter (after all 3 rounds), draw and apply an event to all players.',
       subsections: [
         {
           title: 'Event Types',
-          content:
-            'Events can be positive (viral boost) or negative (security breach, PR crisis).',
+          content: 'Events can be positive (viral moment, Product Hunt) or negative (DDoS, data breach, competitor launch). High server capacity, low tech debt, or high rating can mitigate negative effects.',
+        },
+        {
+          title: 'Mitigation Examples',
+          table: {
+            headers: ['Event', 'Mitigated By', 'Full Effect', 'Reduced Effect'],
+            rows: [
+              { Event: 'DDoS Attack', 'Mitigated By': 'Server > 20', 'Full Effect': '-500 MAU, -1 rating, +1 debt', 'Reduced Effect': '-100 MAU only' },
+              { Event: 'Data Breach', 'Mitigated By': 'Tech Debt < 4', 'Full Effect': '-2 rating, -200 revenue, +2 debt', 'Reduced Effect': '-1 rating, -50 revenue' },
+              { Event: 'Competitor Launch', 'Mitigated By': 'Rating > 7', 'Full Effect': '-300 MAU, +1 debt', 'Reduced Effect': '-50 MAU only' },
+            ],
+          },
         },
       ],
     },
     {
-      number: 8,
-      name: 'Round End',
-      description: 'Each round ends with:',
+      number: 5,
+      name: 'Quarter End',
+      description: 'After the event phase, the quarter wraps up with production, cleanup, and preparation for next quarter.',
       subsections: [
         {
-          title: 'End of Round Tasks',
+          title: 'Production (Mars-Style Tracks)',
           items: [
-            'Income from Revenue (capped if MAU too high)',
-            'Rating adjustments',
-            'MAU decay (if applicable)',
-            'Refresh action slots',
-            'Draft order recalculation',
+            'MAU Production: +200 MAU per production point (max 20 points)',
+            'Revenue Production: +$5 per production point (max 15 points)',
+            'Tech debt reduces effective production (4-7 debt: -1 MAU prod; 8-11: -1 MAU, -1 Rev; 12+: -2 MAU, -1 Rev)',
+            'Product corps: +recurring revenue income',
+          ],
+        },
+        {
+          title: 'Quarter Cleanup',
+          items: [
+            'All engineers unassign',
+            'Quarterly theme changes',
+            'Code token pool refills',
+            'Milestone check',
+            'New engineer draft for next quarter',
           ],
         },
       ],
@@ -440,57 +318,84 @@ export const gameRules = {
 
   scoring: {
     title: 'End of Game Scoring',
-    description: 'After Round 4, calculate your total startup value:',
-    formula: 'Final Score = (MAU / 100) + Revenue + (Rating x 5) + Milestones + Equity Retained Bonus',
-    note: 'More equity retained increases your final score multiplier.',
+    description: 'After Q4, calculate Victory Points based on your play style:',
+    formula: 'Agency: Published App VP + Money/10 + Milestones  |  Product: MAU Milestone VP + Committed Code/2 + Money/10 + Milestones',
+    note: 'Both styles also gain VP from IPO Prep (+25) or Acquisition Target (MAU x 0.002) if taken in Q4.',
   },
 
   milestones: {
     title: 'Milestones',
     description:
-      'The first player to achieve any milestone claims its bonus. Each can only be claimed once.',
+      'The first player to achieve a milestone claims its bonus VP. Each can only be claimed once per game.',
     items: [
-      { name: '10K Users', requirement: 'Reach 10,000 MAU', bonus: '+5 points', icon: '👥' },
-      { name: '$100 Revenue', requirement: 'Reach $100 revenue', bonus: '+5 points', icon: '💰' },
-      { name: '5-Star App', requirement: 'Reach 9+ rating (5 stars)', bonus: '+5 points', icon: '⭐' },
-      { name: 'Zero Debt', requirement: 'Tech debt reduced to 0', bonus: '+5 points', icon: '🔧' },
-      { name: 'AI Mastery', requirement: 'Reach AI capacity 8', bonus: '+5 points', icon: '🤖' },
+      { name: 'First to 5K Users', requirement: 'Reach 5,000 MAU', bonus: '+10 VP', icon: '5K' },
+      { name: 'Five Star Startup', requirement: 'Reach 9+ rating', bonus: '+15 VP', icon: '9+' },
+      { name: 'Clean Code Club', requirement: 'Reach 0 tech debt (after having debt)', bonus: '+10 VP', icon: '0d' },
+      { name: 'Growth Hacker', requirement: 'Reach 10,000 MAU', bonus: '+15 VP', icon: '10K' },
+      { name: 'Revenue King', requirement: 'Reach $1,000 revenue', bonus: '+12 VP', icon: '$1K' },
     ],
   },
 
   specialRules: {
-    title: 'Special Rules & Clarifications',
+    title: 'Key Mechanics & Clarifications',
     rules: [
       {
+        name: 'Code Grid',
+        description: 'Your 4x4 grid holds colored tokens (green, orange, blue, purple). Develop Features adds tokens; Publish App and Commit Code consume them.',
+      },
+      {
         name: 'AI Augmentation',
-        description: 'AI adds +2 power to any engineer but generates tech debt (less for AI-First strategy).',
+        description: 'When placing an engineer, optionally enable AI for +2 power but generates tech debt (1-4 based on engineer level). AI-First tech or certain leaders reduce this.',
       },
       {
         name: 'Tech Debt Penalty',
-        description: 'Every 4 points of tech debt gives -1 power penalty to all engineers.',
+        description: 'Every 4 points of debt = -1 power to all engineers. At 12+ debt: -3 power, -2 MAU production, -1 revenue production, -1 rating.',
       },
-      { name: 'Rating Cap', description: 'Rating is an integer from 1 to 10.' },
-      { name: 'MAU Floor', description: 'MAU cannot fall below 0.' },
-      { name: 'Revenue Floor', description: 'Revenue cannot fall below 0.' },
       {
-        name: 'Puzzle Phase',
-        description: 'Only triggers if 2+ engineers are assigned to Optimize Code.',
+        name: 'Exclusive Actions',
+        description: 'Marketing, Hire Recruiter, Go Viral, IPO Prep, and Acquisition Target each have 1 slot. First player to claim blocks all others for that round.',
+      },
+      {
+        name: 'Snake Draft Order',
+        description: 'Action draft uses snake order by VP (lowest first). If 3 players, the order might be: 1-2-3-3-2-1-1-2-3...',
+      },
+      {
+        name: 'Publish App (Agency)',
+        description: 'Match a pattern from a held app card to your grid. Stars (1-5) depend on how many tokens match. VP = card max VP x (stars/5). Marketing star bonus adds to matches.',
+      },
+      {
+        name: 'Commit Code (Product)',
+        description: 'Once per round. Lock 3 same-color tokens or 4 all-different-color tokens in a row/column. Gives +$1, +1 MAU production, and counts toward VP (1 VP per 2 commits).',
+      },
+      {
+        name: 'MAU Milestones (Product)',
+        description: 'Product corps score VP from reaching MAU thresholds: 1K (+1 VP), 2.5K (+2), 5K (+3), 10K (+5).',
+      },
+      {
+        name: 'Rating Scale',
+        description: 'Integer from 1 to 10. Affects marketing effectiveness and event mitigation. Cannot exceed 10 or drop below 1.',
       },
     ],
   },
 
   houseRules: {
-    title: 'Optional House Rules',
+    title: 'Tips & Strategy',
     rules: [
-      { name: 'Longer Game', description: 'Want a longer game? Try 6 rounds instead of 4.' },
       {
-        name: 'More Chaos',
-        description: 'Want more chaos? Shuffle 2 event cards per round and resolve both.',
+        name: 'Agency Strategy',
+        description: 'Fill your grid quickly with Develop Features, use Marketing for star bonuses, then Publish Apps for VP. Optimize Code helps rearrange tokens into better patterns.',
       },
       {
-        name: 'More Strategy',
-        description:
-          'Want more strategy? Allow milestone stealing if another player surpasses within 1 round.',
+        name: 'Product Strategy',
+        description: 'Build same-color clusters or diverse lines on your grid. Commit Code every round for steady VP + MAU growth. Marketing advances your MAU production track for compounding returns.',
+      },
+      {
+        name: 'Managing Tech Debt',
+        description: 'Keep debt below 4 for no penalties. Pay Down Debt is always available as a safety valve. AI augmentation is powerful but watch the debt accumulation!',
+      },
+      {
+        name: 'Late Game',
+        description: 'Q3 unlocks Go Viral (risky but huge MAU). Q4 unlocks IPO Prep ($50 for +25 VP) and Acquisition Target (cash out MAU for VP). Plan your money for these!',
       },
     ],
   },
@@ -498,13 +403,13 @@ export const gameRules = {
   quickStart: {
     title: 'Quick Start Summary',
     steps: [
-      { step: 1, action: 'Pick corporation identity (Round 1 only)' },
-      { step: 2, action: 'Draft engineers (lowest MAU goes first)' },
-      { step: 3, action: 'Assign engineers to actions' },
-      { step: 4, action: 'Reveal + resolve actions' },
-      { step: 5, action: 'Check milestones + apply event' },
-      { step: 6, action: 'End round and update income' },
-      { step: 7, action: 'Repeat for 4 rounds' },
+      { step: 1, action: 'Pick your leader (1 of 3 persona cards)' },
+      { step: 2, action: 'Choose play style: App Studio or Live Product' },
+      { step: 3, action: 'Draft engineers (lowest MAU picks first)' },
+      { step: 4, action: 'Action Draft: take free actions, then place 1 engineer' },
+      { step: 5, action: 'Actions resolve immediately — repeat for all engineers' },
+      { step: 6, action: '3 rounds per quarter, then event + production' },
+      { step: 7, action: '4 quarters total — highest VP wins!' },
     ],
   },
 };

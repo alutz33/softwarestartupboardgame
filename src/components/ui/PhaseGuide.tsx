@@ -31,18 +31,18 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
     ],
   },
   'funding-selection': {
-    title: 'Choose Funding',
-    emoji: 'Choose Funding',
-    description: 'Pick your funding strategy to complement your leader.',
+    title: 'Choose Play Style',
+    emoji: 'Choose Play Style',
+    description: 'Pick how your startup operates: build apps for clients or grow a live product.',
     steps: [
-      '1. Review the three funding types',
-      '2. Consider starting cash vs. special bonuses',
-      '3. Select your funding and confirm',
+      '1. Review both play styles',
+      '2. Consider scoring strategy (apps vs users)',
+      '3. Select your style and confirm',
     ],
     tips: [
-      'VC-Heavy: Most cash but only 40% equity',
-      'Bootstrapped: Least cash but revenue scores 2x',
-      'Angel-Backed: Balanced, extra draft picks',
+      'App Studio: Score VP by publishing pattern-matched apps',
+      'Live Product: Score VP through MAU milestones + committed code',
+      'Both types share the same grid and engineer mechanics!',
     ],
   },
   'startup-draft': {

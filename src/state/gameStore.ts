@@ -5,13 +5,13 @@ import type {
   GameEvent,
   Player,
   CorporationStrategy,
+  CorporationStyle,
   ActionType,
   Bid,
   CodeBlock,
   Milestone,
   ProductType,
   StartupCard,
-  FundingType,
   PersonaCard,
   PersonaAuctionState,
   HiredEngineer,
@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import {
   TOTAL_QUARTERS,
+  ROUNDS_PER_QUARTER,
   MILESTONE_DEFINITIONS,
   PRODUCTION_CONSTANTS,
   AI_POWER_BONUS,
@@ -31,7 +32,10 @@ import {
   createEmptyGrid,
   createEmptyBuffer,
   MAU_MILESTONES,
+  TOKEN_COLORS,
+  SPECIALTY_TO_COLOR,
 } from '../types';
+import type { TokenPickState } from '../types';
 import {
   FUNDING_OPTIONS,
   TECH_OPTIONS,
@@ -107,7 +111,12 @@ function getPlayerVP(player: Player): number {
 // Build snake draft pick order sorted by VP (lowest first).
 // Same algorithm as buildSnakePickOrder but using VP instead of MAU.
 function buildSnakePickOrderByVP(players: Player[]): string[] {
-  const sorted = [...players].sort((a, b) => getPlayerVP(a) - getPlayerVP(b));
+  // Stable sort: tiebreak by player ID so UI and store always produce the same order
+  const sorted = [...players].sort((a, b) => {
+    const vpDiff = getPlayerVP(a) - getPlayerVP(b);
+    if (vpDiff !== 0) return vpDiff;
+    return a.id.localeCompare(b.id);
+  });
   const ids = sorted.map(p => p.id);
   const reversed = [...ids].reverse();
   const maxPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
@@ -197,7 +206,7 @@ interface GameStore extends GameState {
 
   // Phase 2: Leader draft & funding selection
   selectLeader: (playerId: string, personaId: string) => void;
-  selectFunding: (playerId: string, fundingType: FundingType) => void;
+  selectFunding: (playerId: string, style: CorporationStyle) => void;
   getDealtLeaderCards: (playerId: string) => PersonaCard[];
 
   // Phase 2: Persona auction actions
@@ -448,12 +457,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
-  selectFunding: (playerId: string, fundingType: FundingType) => {
+  selectFunding: (playerId: string, style: CorporationStyle) => {
     set((state) => {
       const player = state.players.find(p => p.id === playerId);
       if (!player || !player.leader) return state;
 
-      const funding = FUNDING_OPTIONS.find(f => f.id === fundingType)!;
+      // Use angel-backed as the balanced default funding for all players
+      const funding = FUNDING_OPTIONS.find(f => f.id === 'angel-backed')!;
       const leaderBonus = player.leader.leaderSide.startingBonus;
 
       // Product type comes from leader's productLock - use first option
@@ -502,9 +512,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         Math.max(0, productionTracks.revenueProduction)
       );
 
-      // Create strategy
+      // Create strategy (funding is now standardized; the key choice is corporation style)
       const strategy: CorporationStrategy = {
-        funding: fundingType,
+        funding: 'angel-backed',
         tech: techType as CorporationStrategy['tech'],
         product: productType,
       };
@@ -514,7 +524,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return {
           ...p,
           strategy,
-          corporationStyle: fundingType === 'bootstrapped' ? 'product' as const : 'agency' as const,
+          corporationStyle: style,
           resources,
           metrics,
           productionTracks,
@@ -2717,17 +2727,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   endRound: () => {
     const state = get();
-    const nextRound = state.currentRound + 1;
+    const currentQuarter = Math.ceil(state.currentRound / ROUNDS_PER_QUARTER);
+    const nextQuarter = currentQuarter + 1;
+    const nextRound = (nextQuarter - 1) * ROUNDS_PER_QUARTER + 1; // First round of next quarter
 
-    if (nextRound > TOTAL_QUARTERS) {
+    if (nextQuarter > TOTAL_QUARTERS) {
       set({ phase: 'game-end' });
       get().calculateWinner();
       return;
     }
 
-    // Generate new engineer pool
+    // Generate new engineer pool for the new quarter
     let engineerPool = generateEngineerPool(
-      nextRound,
+      nextQuarter,
       state.players.length,
       state.players.map((p) => p.hasRecruiterBonus)
     );
@@ -2735,16 +2747,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // INSIDER INFO ability: Add 2 extra engineers for players with this ability
     const insiderInfoCount = state.players.filter(p => hasAbility(p, 'insider-info')).length;
     if (insiderInfoCount > 0) {
-      const extraEngineers = generateEngineerPool(nextRound, insiderInfoCount, []);
+      const extraEngineers = generateEngineerPool(nextQuarter, insiderInfoCount, []);
       engineerPool = [...engineerPool, ...extraEngineers.slice(0, insiderInfoCount * 2)];
     }
 
-    // EVENT FORECASTING: Peek at next round's event
+    // EVENT FORECASTING: Peek at next quarter's event
     const eventDeck = [...state.eventDeck];
     const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
 
     // MARS-STYLE PRODUCTION: Produce resources based on production track positions
-    // This happens at the start of each new round (before the draft)
+    // This happens at the start of each new quarter (before the draft)
     const playersAfterProduction = state.players.map((p) => {
       const debtLevel = getTechDebtLevel(p.resources.techDebt);
 
@@ -2760,6 +2772,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       return {
         ...p,
+        // Unassign all engineers so they're available for next quarter
+        engineers: p.engineers.map(e => ({ ...e, assignedAction: undefined })),
         metrics: {
           ...p.metrics,
           mau: p.metrics.mau + mauGain,
@@ -2779,8 +2793,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       .sort((a, b) => a.metrics.mau - b.metrics.mau)
       .map(p => p.id);
 
-    // Phase 2: Draw persona cards for the round's persona pool
-    const personaDrawCount = nextRound >= 3 ? 3 : 2; // More persona engineers in later rounds
+    // Phase 2: Draw persona cards for the quarter's persona pool
+    const personaDrawCount = nextQuarter >= 3 ? 3 : 2; // More persona engineers in later quarters
     const { drawn: personaPool, remainingDeck: newPersonaDeck } =
       drawPersonasForRound(state.personaDeck, personaDrawCount);
 
@@ -2788,7 +2802,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       players: playersAfterProduction,
       personaDeck: newPersonaDeck,
       currentRound: nextRound,
-      currentQuarter: nextRound,
+      currentQuarter: nextQuarter,
       phase: 'engineer-draft',
       roundState: {
         roundNumber: nextRound,
@@ -2800,10 +2814,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         occupiedActions: new Map(),
         draftOrder,
         upcomingEvent, // Show next quarter's event during planning
-        activeTheme: getThemeForRound(state.quarterlyThemes, nextRound),
+        activeTheme: getThemeForRound(state.quarterlyThemes, nextQuarter),
         // Phase 4: Hybrid auction draft initialization
         draftPhase: 'generic-draft',
         currentDraftPickerIndex: 0,
+        // Refill code pool and app market for new quarter
         codePool: generateCodePool(state.players.length),
         appMarket: state.roundState.appMarket,
       },
@@ -2987,8 +3002,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const turnState = state.roundState.turnState;
       if (!turnState) return;
 
-      // Build the snake order so we can find the current player
-      const snakeOrder = buildSnakePickOrderByVP(state.players);
+      // Use the stored snake order from turnState
+      const snakeOrder = turnState.snakeOrder;
 
       // Validate it's this player's turn
       const currentPickerId = snakeOrder[turnState.currentPlayerIndex];
@@ -3000,16 +3015,58 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // After placing, resolve the action or start a mini-game
       if (INTERACTIVE_ACTIONS.includes(actionType)) {
         // Interactive: set turnState to mini-game and let the UI drive completion
-        set((s) => ({
-          roundState: {
-            ...s.roundState,
-            turnState: {
-              ...s.roundState.turnState!,
-              phase: 'mini-game' as const,
-              pendingAction: actionType,
+        set((s) => {
+          // For develop-features, compute token pick allowance based on specialty + AI
+          let tokenPickState: TokenPickState | undefined;
+          if (actionType === 'develop-features') {
+            const player = s.players.find(p => p.id === playerId);
+            const eng = player?.engineers.find(e => e.id === engineerId);
+            const specialtyColor = eng?.specialty ? SPECIALTY_TO_COLOR[eng.specialty] : undefined;
+            // Specialty match: does this engineer's specialty match develop-features?
+            const hasSpecialtyMatch = !!specialtyColor && !!eng?.specialty && getSpecialtyBonus(eng.specialty, actionType) > 0;
+
+            // Token allowance rules:
+            // Base (no specialty match): 1 token of any color
+            // Specialty match: 2 tokens of specialty color
+            // AI (no specialty match): 2 tokens of any color
+            // AI + specialty match: 3 tokens of specialty color
+            let maxPicks: number;
+            let pickColor: typeof specialtyColor;
+            if (hasSpecialtyMatch && useAi) {
+              maxPicks = 3;
+              pickColor = specialtyColor;
+            } else if (hasSpecialtyMatch) {
+              maxPicks = 2;
+              pickColor = specialtyColor;
+            } else if (useAi) {
+              maxPicks = 2;
+              pickColor = undefined; // any color
+            } else {
+              maxPicks = 1;
+              pickColor = undefined; // any color
+            }
+
+            tokenPickState = {
+              maxPicks,
+              picksRemaining: maxPicks,
+              specialtyColor: pickColor,
+              useAi,
+              engineerId,
+            };
+          }
+
+          return {
+            roundState: {
+              ...s.roundState,
+              turnState: {
+                ...s.roundState.turnState!,
+                phase: 'mini-game' as const,
+                pendingAction: actionType,
+                tokenPickState,
+              },
             },
-          },
-        }));
+          };
+        });
       } else {
         // Non-interactive: resolve the action inline immediately
         set((s) => ({
@@ -3101,6 +3158,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           let newProduction = { ...player.productionTracks };
           let newMarketingStarBonus = player.marketingStarBonus;
           let newRecurringRevenue = player.recurringRevenue;
+          let newTechDebtBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
 
           // Generate tech debt from AI usage
           if (effectiveUseAi) {
@@ -3126,6 +3184,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
               newResources.techDebt += 1;
             }
             newResources.techDebt += aiDebt;
+
+            // Fill tech debt buffer with random tokens from AI usage
+            if (aiDebt > 0) {
+              for (let i = 0; i < aiDebt && newTechDebtBuffer.tokens.length < newTechDebtBuffer.maxSize; i++) {
+                const randomColor = TOKEN_COLORS[Math.floor(Math.random() * TOKEN_COLORS.length)];
+                newTechDebtBuffer.tokens.push(randomColor);
+              }
+            }
           }
 
           // Parallel Processor: Research AI gives +1 server capacity
@@ -3283,6 +3349,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               productionTracks: newProduction,
               marketingStarBonus: newMarketingStarBonus,
               recurringRevenue: newRecurringRevenue,
+              techDebtBuffer: newTechDebtBuffer,
             };
           });
 
@@ -3437,6 +3504,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   startActionDraft: () => {
     set((state) => {
+      const snakeOrder = buildSnakePickOrderByVP(state.players);
       return {
         phase: 'action-draft' as GamePhase,
         roundState: {
@@ -3445,6 +3513,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           turnState: {
             currentPlayerIndex: 0,
             phase: 'free-actions' as const,
+            snakeOrder,
           },
         },
       };
@@ -3456,7 +3525,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const turnState = state.roundState.turnState;
       if (!turnState) return state;
 
-      const snakeOrder = buildSnakePickOrderByVP(state.players);
+      // Use the stored snake order from turnState (computed once per round)
+      const snakeOrder = turnState.snakeOrder;
 
       // Count total engineers and total placed engineers
       const totalEngineers = state.players.reduce(
@@ -3466,8 +3536,54 @@ export const useGameStore = create<GameStore>((set, get) => ({
         (sum, p) => sum + p.engineers.filter(e => e.assignedAction).length, 0
       );
 
-      // If all engineers have been placed, transition to event phase
-      if (placedEngineers >= totalEngineers) {
+      // Check if all engineers have been placed (round is complete)
+      const allPlaced = placedEngineers >= totalEngineers;
+
+      if (!allPlaced) {
+        // Advance to the next player in snake order
+        let nextIndex = turnState.currentPlayerIndex + 1;
+
+        // Wrap around
+        if (nextIndex >= snakeOrder.length) {
+          nextIndex = 0;
+        }
+
+        // Skip players who have no unassigned engineers
+        let attempts = 0;
+        const maxAttempts = snakeOrder.length;
+        while (attempts < maxAttempts) {
+          const nextPlayerId = snakeOrder[nextIndex];
+          const nextPlayer = state.players.find(p => p.id === nextPlayerId);
+          const hasUnassigned = nextPlayer?.engineers.some(e => !e.assignedAction);
+
+          if (hasUnassigned) break;
+
+          nextIndex = (nextIndex + 1) % snakeOrder.length;
+          attempts++;
+        }
+
+        // If nobody has unassigned engineers, treat as all placed
+        if (attempts < maxAttempts) {
+          return {
+            roundState: {
+              ...state.roundState,
+              turnState: {
+                ...turnState,
+                currentPlayerIndex: nextIndex,
+                phase: 'free-actions' as const,
+              },
+            },
+          };
+        }
+      }
+
+      // All engineers placed — this round of the action draft is complete.
+      // Check if this is the last round of the quarter.
+      const roundInQuarter = ((state.currentRound - 1) % ROUNDS_PER_QUARTER) + 1;
+      const isLastRoundOfQuarter = roundInQuarter >= ROUNDS_PER_QUARTER;
+
+      if (isLastRoundOfQuarter) {
+        // End of quarter: go to event phase for quarterly cleanup
         return {
           phase: 'event' as GamePhase,
           roundState: {
@@ -3476,51 +3592,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
             turnState: undefined,
           },
         };
-      }
-
-      // Advance to the next player in snake order
-      let nextIndex = turnState.currentPlayerIndex + 1;
-
-      // Wrap around
-      if (nextIndex >= snakeOrder.length) {
-        nextIndex = 0;
-      }
-
-      // Skip players who have no unassigned engineers
-      let attempts = 0;
-      const maxAttempts = snakeOrder.length;
-      while (attempts < maxAttempts) {
-        const nextPlayerId = snakeOrder[nextIndex];
-        const nextPlayer = state.players.find(p => p.id === nextPlayerId);
-        const hasUnassigned = nextPlayer?.engineers.some(e => !e.assignedAction);
-
-        if (hasUnassigned) break;
-
-        nextIndex = (nextIndex + 1) % snakeOrder.length;
-        attempts++;
-      }
-
-      // If nobody has unassigned engineers, transition to event phase
-      if (attempts >= maxAttempts) {
+      } else {
+        // Mid-quarter: unassign engineers, reset per-round flags, start next round
+        const nextRound = state.currentRound + 1;
+        const newPlayers = state.players.map(p => ({
+          ...p,
+          engineers: p.engineers.map(e => ({ ...e, assignedAction: undefined })),
+          commitCodeUsedThisRound: false,
+        }));
+        const newSnakeOrder = buildSnakePickOrderByVP(newPlayers);
         return {
-          phase: 'event' as GamePhase,
+          currentRound: nextRound,
+          players: newPlayers,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'event' as GamePhase,
-            turnState: undefined,
+            phase: 'action-draft' as GamePhase,
+            occupiedActions: new Map(),
+            turnState: {
+              currentPlayerIndex: 0,
+              phase: 'free-actions' as const,
+              snakeOrder: newSnakeOrder,
+            },
           },
         };
       }
-
-      return {
-        roundState: {
-          ...state.roundState,
-          turnState: {
-            currentPlayerIndex: nextIndex,
-            phase: 'free-actions' as const,
-          },
-        },
-      };
     });
   },
 
@@ -3562,6 +3658,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const tokenColor = pool[tokenIndex];
 
+      // Validate color restriction from tokenPickState
+      const pickState = turnState.tokenPickState;
+      if (pickState?.specialtyColor && tokenColor !== pickState.specialtyColor) {
+        return state; // wrong color for specialty pick
+      }
+
       // Build updated pool (remove the token at tokenIndex)
       const newPool = [...pool];
       newPool.splice(tokenIndex, 1);
@@ -3578,18 +3680,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       });
 
-      return {
-        players: updatedPlayers,
-        roundState: {
-          ...state.roundState,
-          codePool: newPool,
-          turnState: {
-            ...turnState,
-            phase: 'free-actions' as const,
-            pendingAction: undefined,
+      // Check if more picks remain
+      const newPicksRemaining = pickState ? pickState.picksRemaining - 1 : 0;
+      const isDone = newPicksRemaining <= 0 || newPool.length === 0;
+
+      if (isDone) {
+        // All picks used or pool empty — return to free-actions
+        return {
+          players: updatedPlayers,
+          roundState: {
+            ...state.roundState,
+            codePool: newPool,
+            turnState: {
+              ...turnState,
+              phase: 'free-actions' as const,
+              pendingAction: undefined,
+              tokenPickState: undefined,
+            },
           },
-        },
-      };
+        };
+      } else {
+        // More picks remaining — stay in mini-game
+        return {
+          players: updatedPlayers,
+          roundState: {
+            ...state.roundState,
+            codePool: newPool,
+            turnState: {
+              ...turnState,
+              tokenPickState: pickState ? {
+                ...pickState,
+                picksRemaining: newPicksRemaining,
+              } : undefined,
+            },
+          },
+        };
+      }
     });
   },
 
@@ -3697,29 +3823,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (player.commitCodeUsedThisRound) return;
 
     const style = player.corporationStyle;
+    const cells = player.codeGrid.cells;
 
-    if (style === 'agency') {
-      // Agency: remove 1 token at (row, col)
-      const cell = player.codeGrid.cells[row]?.[col];
+    // ---- Commit Scoring Table ----
+    // Blocks | Agency VP / $ | Product VP / MAU Prod / $
+    // 1      | 1 VP / $0     | 0 VP / +0 / $1
+    // 3      | 3 VP / $1     | 2 VP / +1 / $2
+    // 4      | 5 VP / $2     | 3 VP / +1 / $3
+    // 5      | 7 VP / $3     | 5 VP / +2 / $5
+
+    if (style === 'agency' && !direction) {
+      // Agency single-token commit: remove 1 token at (row, col), earn 1 VP
+      const cell = cells[row]?.[col];
       if (cell === null || cell === undefined) return;
 
-      const newCells = player.codeGrid.cells.map(r => [...r]);
+      const newCells = cells.map(r => [...r]);
       newCells[row][col] = null;
 
       set((state) => ({
         players: state.players.map((p, i) => {
           if (i !== playerIndex) return p;
+          // 1 block = 1 VP
+          const vpEarned = 1;
           return {
             ...p,
             commitCodeUsedThisRound: true,
             codeGrid: { ...p.codeGrid, cells: newCells },
+            publishedApps: [
+              ...p.publishedApps,
+              { cardId: `commit-${Date.now()}`, name: 'Code Commit', stars: 1, vpEarned, moneyEarned: 0, pattern: [] },
+            ],
           };
         }),
       }));
-    } else if (style === 'product') {
-      // Product: validate 3-same-color or 4-all-different-color pattern in direction, clear and give $1 + MAU
-      const requiredCount = count || 3;
-      const cells = player.codeGrid.cells;
+    } else if (direction && count) {
+      // Multi-token commit: validate line pattern and clear tokens
+      const requiredCount = count;
       const startColor = cells[row]?.[col];
       if (startColor === null || startColor === undefined) return;
 
@@ -3734,17 +3873,65 @@ export const useGameStore = create<GameStore>((set, get) => ({
         tokens.push({ r, c, color: cellColor });
       }
 
-      // Validate: all same color (count=3) or 1 of each (count=4)
+      // Validate: all same color (count=3) or all different (count=4+)
       const colors = new Set(tokens.map(t => t.color));
-      const valid = (requiredCount === 3 && colors.size === 1) || (requiredCount === 4 && colors.size === 4);
+      let valid = false;
+      if (requiredCount === 3 && colors.size === 1) valid = true;
+      if (requiredCount === 4 && colors.size === 4) valid = true;
+      if (requiredCount === 5 && colors.size === 1) valid = true; // 5 same-color for max combo
       if (!valid) return;
 
-      const positions = tokens.map(t => ({ r: t.r, c: t.c }));
+      const newCells = cells.map(r => [...r]);
+      for (const t of tokens) {
+        newCells[t.r][t.c] = null;
+      }
+
+      // Scale rewards by block count
+      let vpEarned: number;
+      let moneyEarned: number;
+      let mauProdGain: number;
+
+      if (style === 'agency' || !style) {
+        // Agency scoring: VP + $ based on blocks
+        if (requiredCount >= 5) { vpEarned = 7; moneyEarned = 3; mauProdGain = 0; }
+        else if (requiredCount === 4) { vpEarned = 5; moneyEarned = 2; mauProdGain = 0; }
+        else { vpEarned = 3; moneyEarned = 1; mauProdGain = 0; }
+      } else {
+        // Product scoring: VP + MAU production + $
+        if (requiredCount >= 5) { vpEarned = 5; moneyEarned = 5; mauProdGain = 2; }
+        else if (requiredCount === 4) { vpEarned = 3; moneyEarned = 3; mauProdGain = 1; }
+        else { vpEarned = 2; moneyEarned = 2; mauProdGain = 1; }
+      }
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            resources: { ...p.resources, money: p.resources.money + moneyEarned },
+            codeGrid: { ...p.codeGrid, cells: newCells },
+            productionTracks: {
+              ...p.productionTracks,
+              mauProduction: Math.min(
+                p.productionTracks.mauProduction + mauProdGain,
+                PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+              ),
+            },
+            publishedApps: [
+              ...p.publishedApps,
+              { cardId: `commit-${Date.now()}`, name: `Code Commit (${requiredCount})`, stars: Math.min(5, requiredCount), vpEarned, moneyEarned, pattern: [] },
+            ],
+          };
+        }),
+      }));
+    } else if (style === 'product' && !direction) {
+      // Product single-token commit: remove 1 token for $1, no VP
+      const cell = cells[row]?.[col];
+      if (cell === null || cell === undefined) return;
 
       const newCells = cells.map(r => [...r]);
-      for (const pos of positions) {
-        newCells[pos.r][pos.c] = null;
-      }
+      newCells[row][col] = null;
 
       set((state) => ({
         players: state.players.map((p, i) => {
@@ -3754,13 +3941,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
             commitCodeUsedThisRound: true,
             resources: { ...p.resources, money: p.resources.money + 1 },
             codeGrid: { ...p.codeGrid, cells: newCells },
-            productionTracks: {
-              ...p.productionTracks,
-              mauProduction: Math.min(
-                p.productionTracks.mauProduction + 1,
-                20
-              ),
-            },
           };
         }),
       }));

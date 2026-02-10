@@ -3,8 +3,7 @@ import { motion } from 'framer-motion';
 import { Button, Card, CardContent, Badge } from '../ui';
 import { PhaseGuide } from '../ui/PhaseGuide';
 import { useGameStore } from '../../state/gameStore';
-import type { FundingType, ProductType } from '../../types';
-import { FUNDING_OPTIONS } from '../../data/corporations';
+import type { CorporationStyle, ProductType } from '../../types';
 
 const productTypeLabels: Record<ProductType, string> = {
   b2b: 'B2B SaaS',
@@ -12,19 +11,54 @@ const productTypeLabels: Record<ProductType, string> = {
   platform: 'Platform Play',
 };
 
+const STYLE_OPTIONS: { id: CorporationStyle; name: string; tagline: string; description: string; scoring: string[]; keyActions: string[] }[] = [
+  {
+    id: 'agency',
+    name: 'App Studio',
+    tagline: 'Build apps, ship fast, score big',
+    description: 'You run a development agency that builds and publishes apps for clients. Match code patterns on your grid to app cards, then publish them for star ratings and VP.',
+    scoring: [
+      'VP from published app star ratings',
+      'Marketing adds bonus stars to publishes',
+      'Monetization earns $1 per total published star',
+    ],
+    keyActions: [
+      'Develop Features: Pick tokens to build patterns',
+      'Publish App (free): Match grid patterns to app cards',
+      'Marketing: +1 star bonus on next publish',
+    ],
+  },
+  {
+    id: 'product',
+    name: 'Live Product',
+    tagline: 'Build your product, grow your users',
+    description: 'You\'re building a live product with real users. Commit code to your codebase, grow your MAU through production tracks, and score VP from user milestones.',
+    scoring: [
+      'VP from MAU milestones (1K, 2.5K, 5K, 10K users)',
+      'VP from committed code (1 VP per 2 commits)',
+      'Marketing advances MAU production track',
+    ],
+    keyActions: [
+      'Develop Features: Pick tokens to build your grid',
+      'Commit Code (free): Lock grid rows/columns for VP',
+      'Marketing: Advance MAU production each round',
+    ],
+  },
+];
+
 export function FundingSelection() {
   const players = useGameStore((state) => state.players);
   const selectFunding = useGameStore((state) => state.selectFunding);
-  const [selectedFunding, setSelectedFunding] = useState<Record<string, FundingType | null>>({});
+  const [selectedStyle, setSelectedStyle] = useState<Record<string, CorporationStyle | null>>({});
 
-  // Find players who haven't selected funding yet
+  // Find players who haven't selected yet
   const pendingPlayers = players.filter((p) => !p.strategy);
   const currentPlayer = pendingPlayers[0];
 
   if (!currentPlayer) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-lg">All players have selected funding. Starting game...</div>
+        <div className="text-white text-lg">All players ready. Starting game...</div>
       </div>
     );
   }
@@ -33,12 +67,12 @@ export function FundingSelection() {
   if (!leader) return null;
 
   const leaderSide = leader.leaderSide;
-  const currentSelection = selectedFunding[currentPlayer.id] || null;
+  const currentSelection = selectedStyle[currentPlayer.id] || null;
 
   const handleConfirm = () => {
     if (currentSelection) {
       selectFunding(currentPlayer.id, currentSelection);
-      setSelectedFunding((prev) => ({ ...prev, [currentPlayer.id]: null }));
+      setSelectedStyle((prev) => ({ ...prev, [currentPlayer.id]: null }));
     }
   };
 
@@ -95,25 +129,25 @@ export function FundingSelection() {
             <div className="text-center mb-6">
               <h2 className="text-2xl font-bold text-white">
                 <span style={{ color: currentPlayer.color }}>{currentPlayer.name}</span>
-                {' '}- Choose Your Funding
+                {' '}- Choose Your Play Style
               </h2>
               <p className="text-gray-400 mt-1">
-                Select a funding strategy to complement {leader.name}'s strengths
+                How will you build your software empire with {leader.name}?
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {FUNDING_OPTIONS.map((funding) => {
-                const isSelected = currentSelection === funding.id;
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {STYLE_OPTIONS.map((option) => {
+                const isSelected = currentSelection === option.id;
 
                 return (
                   <motion.div
-                    key={funding.id}
+                    key={option.id}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setSelectedFunding((prev) => ({
+                    onClick={() => setSelectedStyle((prev) => ({
                       ...prev,
-                      [currentPlayer.id]: funding.id,
+                      [currentPlayer.id]: option.id,
                     }))}
                     className="cursor-pointer"
                   >
@@ -124,38 +158,41 @@ export function FundingSelection() {
                           : 'border border-gray-700 bg-gray-800 hover:border-gray-500'
                       }`}
                     >
-                      <CardContent className="p-5">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-lg font-bold text-white">{funding.name}</h3>
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-xl font-bold text-white">{option.name}</h3>
                           {isSelected && (
                             <Badge variant="success" size="sm">Selected</Badge>
                           )}
                         </div>
+                        <div className="text-sm text-indigo-400 font-medium mb-3">{option.tagline}</div>
 
-                        <p className="text-sm text-gray-300 mb-4">{funding.description}</p>
+                        <p className="text-sm text-gray-300 mb-4">{option.description}</p>
 
-                        {/* Key stats */}
-                        <div className="space-y-2 mb-4">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-400">Starting Cash</span>
-                            <span className="text-green-400 font-semibold">${funding.startingMoney}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-400">Equity Retained</span>
-                            <span className="text-blue-400 font-semibold">{funding.equityRetained}%</span>
-                          </div>
+                        {/* Scoring */}
+                        <div className="bg-gray-900/50 rounded p-3 mb-3">
+                          <div className="text-xs text-yellow-400 font-semibold mb-2">HOW YOU SCORE VP</div>
+                          <ul className="space-y-1">
+                            {option.scoring.map((s, i) => (
+                              <li key={i} className="text-xs text-gray-300 flex items-start gap-2">
+                                <span className="text-yellow-400 mt-0.5">*</span>
+                                <span>{s}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
 
-                        {/* Bonus effect */}
-                        <div className="bg-gray-900/50 rounded p-3">
-                          <div className="text-xs text-yellow-400 font-semibold mb-1">BONUS</div>
-                          <p className="text-xs text-gray-300">{funding.bonusEffect}</p>
-                        </div>
-
-                        {/* Power */}
-                        <div className="mt-3 bg-purple-900/20 border border-purple-700/30 rounded p-2">
-                          <div className="text-xs text-purple-400 font-semibold">{funding.power.name}</div>
-                          <p className="text-[10px] text-gray-400">{funding.power.description}</p>
+                        {/* Key Actions */}
+                        <div className="bg-indigo-900/20 border border-indigo-700/30 rounded p-3">
+                          <div className="text-xs text-indigo-400 font-semibold mb-2">KEY ACTIONS</div>
+                          <ul className="space-y-1">
+                            {option.keyActions.map((a, i) => (
+                              <li key={i} className="text-xs text-gray-300 flex items-start gap-2">
+                                <span className="text-indigo-400 mt-0.5">*</span>
+                                <span>{a}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       </CardContent>
                     </Card>
@@ -172,8 +209,8 @@ export function FundingSelection() {
                 className="px-8 py-3 text-lg"
               >
                 {currentSelection
-                  ? `Confirm ${FUNDING_OPTIONS.find((f) => f.id === currentSelection)?.name}`
-                  : 'Select a Funding Type'}
+                  ? `Confirm ${STYLE_OPTIONS.find((o) => o.id === currentSelection)?.name}`
+                  : 'Select a Play Style'}
               </Button>
             </div>
           </div>

@@ -3,7 +3,8 @@
 // ============================================
 
 export const TOTAL_QUARTERS = 4;
-export const TOTAL_ROUNDS = TOTAL_QUARTERS; // Backwards compatibility alias
+export const ROUNDS_PER_QUARTER = 3;
+export const TOTAL_ROUNDS = TOTAL_QUARTERS * ROUNDS_PER_QUARTER; // 12 rounds total
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 2;
 
@@ -571,8 +572,8 @@ export const MILESTONE_DEFINITIONS = [
 export interface GameState {
   id: string;
   phase: GamePhase;
-  currentRound: number; // Now represents quarters (Q1-Q4)
-  currentQuarter: number; // Alias for currentRound
+  currentRound: number; // 1-12 (3 rounds per quarter)
+  currentQuarter: number; // 1-4, derived from Math.ceil(currentRound / ROUNDS_PER_QUARTER)
   players: Player[];
   currentPlayerIndex: number;
   roundState: RoundState;
@@ -876,10 +877,21 @@ export type CorporationStyle = 'agency' | 'product';
 // Turn state within Action Draft phase
 export type TurnPhase = 'free-actions' | 'place-engineer' | 'resolving' | 'mini-game';
 
+// Token pick state for develop-features mini-game
+export interface TokenPickState {
+  maxPicks: number;           // total tokens the player can pick this action
+  picksRemaining: number;     // how many more tokens can be placed
+  specialtyColor?: TokenColor; // if set, specialty-matching tokens only (or any color if undefined)
+  useAi: boolean;             // whether AI augmentation is active (affects tech debt)
+  engineerId: string;         // the engineer performing this action
+}
+
 export interface TurnState {
   currentPlayerIndex: number;
   phase: TurnPhase;
   pendingAction?: ActionType; // action being resolved (for interactive resolution)
+  snakeOrder: string[]; // pre-computed snake draft order for this round (stored so UI and store stay in sync)
+  tokenPickState?: TokenPickState; // multi-token pick tracking for develop-features
 }
 
 // MAU Milestones (Product corporation scoring)

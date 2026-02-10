@@ -45,6 +45,7 @@ function StatBar({
 export function RoundEnd() {
   const players = useGameStore((state) => state.players);
   const currentRound = useGameStore((state) => state.currentRound);
+  const currentQuarter = useGameStore((state) => state.currentQuarter);
   const milestones = useGameStore((state) => state.milestones);
   const endRound = useGameStore((state) => state.endRound);
 
@@ -78,11 +79,11 @@ export function RoundEnd() {
       <div className="max-w-[1400px] mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-3xl lg:text-4xl font-bold text-white mb-2">
-            Q{currentRound} Complete!
+            Q{currentQuarter} Complete!
           </h1>
           <p className="text-gray-400">
-            {currentRound < TOTAL_QUARTERS
-              ? `${TOTAL_QUARTERS - currentRound} quarter${TOTAL_QUARTERS - currentRound !== 1 ? 's' : ''} remaining in Year 1`
+            {currentQuarter < TOTAL_QUARTERS
+              ? `${TOTAL_QUARTERS - currentQuarter} quarter${TOTAL_QUARTERS - currentQuarter !== 1 ? 's' : ''} remaining in Year 1`
               : 'End of Year 1!'}
           </p>
         </div>
@@ -235,7 +236,7 @@ export function RoundEnd() {
           {/* Right sidebar - Info */}
           <div className="col-span-12 lg:col-span-4 space-y-4">
             {/* Win Condition reminder */}
-            <WinCondition players={players} currentRound={currentRound} />
+            <WinCondition players={players} currentRound={currentQuarter} />
 
             {/* Milestones */}
             <MilestoneTracker
@@ -244,7 +245,7 @@ export function RoundEnd() {
             />
 
             {/* Next Quarter Preview */}
-            {currentRound < TOTAL_QUARTERS && (
+            {currentQuarter < TOTAL_QUARTERS && (
               <HelpCard title="Next Quarter Preview" variant="info">
                 <div className="space-y-3 text-xs">
                   <div>
@@ -264,13 +265,13 @@ export function RoundEnd() {
 
                   <div className="pt-2 border-t border-gray-700">
                     <div className="text-gray-400">Income Cap Next Quarter:</div>
-                    <div className="text-yellow-400 font-bold">${30 + ((currentRound + 1) * 10)}</div>
+                    <div className="text-yellow-400 font-bold">${30 + ((currentQuarter + 1) * 10)}</div>
                   </div>
 
                   <div>
                     <div className="text-gray-400">Engineer Pool Quality:</div>
                     <div className="text-white">
-                      {currentRound + 1 === 2 ? '40%' : currentRound + 1 === 3 ? '50%' : '60%'} seniors
+                      {currentQuarter + 1 === 2 ? '40%' : currentQuarter + 1 === 3 ? '50%' : '60%'} seniors
                     </div>
                   </div>
                 </div>
@@ -300,7 +301,7 @@ export function RoundEnd() {
 
         <div className="flex justify-center mt-8">
           <Button size="lg" onClick={endRound}>
-            {currentRound < TOTAL_QUARTERS ? 'Start Next Quarter' : 'See Year 1 Results'}
+            {currentQuarter < TOTAL_QUARTERS ? 'Start Next Quarter' : 'See Year 1 Results'}
           </Button>
         </div>
       </div>

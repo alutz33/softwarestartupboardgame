@@ -80,6 +80,7 @@ export function ActionDraftPhase() {
   const players = useGameStore((s) => s.players);
   const roundState = useGameStore((s) => s.roundState);
   const currentRound = useGameStore((s) => s.currentRound);
+  const currentQuarter = useGameStore((s) => s.currentQuarter);
   // Store actions
   const claimActionSlot = useGameStore((s) => s.claimActionSlot);
   const canAffordAction = useGameStore((s) => s.canAffordAction);
@@ -135,38 +136,13 @@ export function ActionDraftPhase() {
   }, [turnState?.phase, turnState?.pendingAction, optimizeGame]);
   const turnIndex = turnState?.currentPlayerIndex ?? 0;
 
-  // The snake order is built by VP inside the store; we approximate here by
-  // deriving the current player ID from the roundState.draftOrder.  However,
-  // draftOrder is the engineer-draft order and the store uses its own
-  // buildSnakePickOrderByVP for action-draft.  We need a simpler approach:
-  // use draftOrder if it contains the right number of entries, otherwise fall
-  // back to finding the player whose turn it is via a helper.
-  //
-  // The store tracks the snake-order index in turnState.currentPlayerIndex.
-  // Since we can't call buildSnakePickOrderByVP from the UI, we rely on the
-  // store's endTurn to advance the index.  We need to figure out which player
-  // ID corresponds to that index.
-  //
-  // Simplest correct approach: replicate the VP snake order here.
-  const getSnakeOrder = (): string[] => {
-    const sorted = [...players].sort((a, b) => getPlayerVP(a) - getPlayerVP(b));
-    const ids = sorted.map((p) => p.id);
-    const reversed = [...ids].reverse();
-    const maxPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
-    const rounds = Math.ceil(maxPicks / ids.length) + 1;
-    const order: string[] = [];
-    for (let i = 0; i < rounds; i++) {
-      order.push(...(i % 2 === 0 ? ids : reversed));
-    }
-    return order;
-  };
-
-  const snakeOrder = getSnakeOrder();
+  // Use the stored snake order from turnState (computed once per round in the store)
+  const snakeOrder = turnState?.snakeOrder ?? players.map(p => p.id);
   const currentPlayerId = snakeOrder[turnIndex] ?? players[0]?.id;
   const currentPlayer = players.find((p) => p.id === currentPlayerId) ?? players[0];
   const opponents = players.filter((p) => p.id !== currentPlayer.id);
 
-  const availableActions = getAvailableActions(currentRound);
+  const availableActions = getAvailableActions(currentQuarter);
 
   // ---- VP helper (mirrors store's getPlayerVP) ----
   function getPlayerVP(player: (typeof players)[number]): number {
@@ -271,6 +247,7 @@ export function ActionDraftPhase() {
 
   const handleCommitCodeClick = useCallback(() => {
     if (currentPlayer.commitCodeUsedThisRound) return;
+    // Both styles: first select 1 token (single commit) or pick a starting cell for line commit
     if (currentPlayer.corporationStyle === 'agency') {
       setFreeActionMode({ type: 'commit-agency' });
     } else {
@@ -282,9 +259,9 @@ export function ActionDraftPhase() {
     if (freeActionMode?.type !== 'commit-agency') return;
     const cell = currentPlayer.codeGrid.cells[row]?.[col];
     if (cell === null || cell === undefined) return;
-    commitCode(currentPlayer.id, row, col);
-    setFreeActionMode(null);
-  }, [freeActionMode, currentPlayer.codeGrid.cells, currentPlayer.id, commitCode]);
+    // Agency: pick a starting token, then decide single or line commit
+    setFreeActionMode({ type: 'commit-product-direction', row, col });
+  }, [freeActionMode, currentPlayer.codeGrid.cells]);
 
   const handleCommitProductStartClick = useCallback((row: number, col: number) => {
     if (freeActionMode?.type !== 'commit-product-start') return;
@@ -293,7 +270,14 @@ export function ActionDraftPhase() {
     setFreeActionMode({ type: 'commit-product-direction', row, col });
   }, [freeActionMode, currentPlayer.codeGrid.cells]);
 
-  const handleCommitProductDirection = useCallback((direction: 'row' | 'col', count: 3 | 4) => {
+  const handleCommitSingle = useCallback(() => {
+    if (freeActionMode?.type !== 'commit-product-direction') return;
+    // Single token commit (no direction/count)
+    commitCode(currentPlayer.id, freeActionMode.row, freeActionMode.col);
+    setFreeActionMode(null);
+  }, [freeActionMode, currentPlayer.id, commitCode]);
+
+  const handleCommitProductDirection = useCallback((direction: 'row' | 'col', count: 3 | 4 | 5) => {
     if (freeActionMode?.type !== 'commit-product-direction') return;
     commitCode(currentPlayer.id, freeActionMode.row, freeActionMode.col, direction, count);
     setFreeActionMode(null);
@@ -482,23 +466,47 @@ export function ActionDraftPhase() {
       {/* ===== TOP BAR ===== */}
       <header className="bg-gray-800 border-b border-gray-700 px-4 py-2">
         <div className="max-w-[1800px] mx-auto flex items-center justify-between">
-          {/* Quarter indicators */}
-          <div className="flex items-center gap-2">
-            {[1, 2, 3, 4].map((q) => (
-              <div
-                key={q}
-                className={`
-                  px-3 py-1 rounded text-sm font-bold
-                  ${q === currentRound
-                    ? 'bg-indigo-600 text-white'
-                    : q < currentRound
-                      ? 'bg-gray-600 text-gray-300'
-                      : 'bg-gray-700 text-gray-500'}
-                `}
-              >
-                Q{q}
-              </div>
-            ))}
+          {/* Quarter indicators + round within quarter */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {[1, 2, 3, 4].map((q) => (
+                <div
+                  key={q}
+                  className={`
+                    px-3 py-1 rounded text-sm font-bold
+                    ${q === currentQuarter
+                      ? 'bg-indigo-600 text-white'
+                      : q < currentQuarter
+                        ? 'bg-gray-600 text-gray-300'
+                        : 'bg-gray-700 text-gray-500'}
+                  `}
+                >
+                  Q{q}
+                </div>
+              ))}
+            </div>
+            {/* Round within quarter */}
+            <div className="flex items-center gap-1 ml-1">
+              {[1, 2, 3].map((r) => {
+                const roundInQuarter = ((currentRound - 1) % 3) + 1;
+                return (
+                  <div
+                    key={r}
+                    className={`w-2 h-2 rounded-full ${
+                      r === roundInQuarter
+                        ? 'bg-indigo-400'
+                        : r < roundInQuarter
+                          ? 'bg-gray-500'
+                          : 'bg-gray-700'
+                    }`}
+                    title={`Round ${r} of 3`}
+                  />
+                );
+              })}
+              <span className="text-xs text-gray-400 ml-1">
+                R{((currentRound - 1) % 3) + 1}/3
+              </span>
+            </div>
           </div>
 
           {/* Current turn indicator */}
@@ -571,19 +579,11 @@ export function ActionDraftPhase() {
                     </span>
                   </>
                 )}
-                {freeActionMode.type === 'commit-agency' && (
+                {(freeActionMode.type === 'commit-agency' || freeActionMode.type === 'commit-product-start') && (
                   <>
                     <Badge variant="warning" size="sm">Commit Code</Badge>
                     <span className="text-sm text-gray-200">
-                      Click a token on your grid to remove it
-                    </span>
-                  </>
-                )}
-                {freeActionMode.type === 'commit-product-start' && (
-                  <>
-                    <Badge variant="warning" size="sm">Commit Code</Badge>
-                    <span className="text-sm text-gray-200">
-                      Click the starting cell of a 3-same-color or 4-all-different line
+                      Click a starting token on your grid (single or line commit)
                     </span>
                   </>
                 )}
@@ -591,7 +591,7 @@ export function ActionDraftPhase() {
                   <>
                     <Badge variant="warning" size="sm">Commit Code</Badge>
                     <span className="text-sm text-gray-200">
-                      Choose direction and count from cell ({freeActionMode.row}, {freeActionMode.col})
+                      Choose commit mode from cell ({freeActionMode.row}, {freeActionMode.col})
                     </span>
                   </>
                 )}
@@ -607,7 +607,7 @@ export function ActionDraftPhase() {
         )}
       </AnimatePresence>
 
-      {/* ===== COMMIT PRODUCT DIRECTION PICKER ===== */}
+      {/* ===== COMMIT CODE DIRECTION/MODE PICKER ===== */}
       <AnimatePresence>
         {freeActionMode?.type === 'commit-product-direction' && (
           <motion.div
@@ -616,32 +616,56 @@ export function ActionDraftPhase() {
             exit={{ height: 0, opacity: 0 }}
             className="bg-gray-800/80 border-b border-gray-600 overflow-hidden"
           >
-            <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center gap-4">
-              <span className="text-sm text-gray-300">Direction:</span>
-              <div className="flex gap-2">
+            <div className="max-w-[1800px] mx-auto px-4 py-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm text-gray-300">Commit from ({freeActionMode.row}, {freeActionMode.col}):</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {/* Single token */}
+                <button
+                  onClick={handleCommitSingle}
+                  className="px-3 py-1.5 text-xs rounded bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+                >
+                  1 Token ({currentPlayer.corporationStyle === 'product' ? '$1' : '1 VP'})
+                </button>
+                {/* 3 in line */}
                 <button
                   onClick={() => handleCommitProductDirection('row', 3)}
                   className="px-3 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
                 >
-                  3 in Row (same color)
+                  3 in Row (same color) — {currentPlayer.corporationStyle === 'product' ? '2 VP + $2' : '3 VP + $1'}
                 </button>
                 <button
                   onClick={() => handleCommitProductDirection('col', 3)}
                   className="px-3 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
                 >
-                  3 in Column (same color)
+                  3 in Column (same color) — {currentPlayer.corporationStyle === 'product' ? '2 VP + $2' : '3 VP + $1'}
                 </button>
+                {/* 4 in line */}
                 <button
                   onClick={() => handleCommitProductDirection('row', 4)}
                   className="px-3 py-1.5 text-xs rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
                 >
-                  4 in Row (all different)
+                  4 in Row (all different) — {currentPlayer.corporationStyle === 'product' ? '3 VP + $3' : '5 VP + $2'}
                 </button>
                 <button
                   onClick={() => handleCommitProductDirection('col', 4)}
                   className="px-3 py-1.5 text-xs rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
                 >
-                  4 in Column (all different)
+                  4 in Column (all different) — {currentPlayer.corporationStyle === 'product' ? '3 VP + $3' : '5 VP + $2'}
+                </button>
+                {/* 5 in line */}
+                <button
+                  onClick={() => handleCommitProductDirection('row', 5)}
+                  className="px-3 py-1.5 text-xs rounded bg-yellow-700 hover:bg-yellow-600 text-white transition-colors"
+                >
+                  5 in Row (same color) — {currentPlayer.corporationStyle === 'product' ? '5 VP + $5' : '7 VP + $3'}
+                </button>
+                <button
+                  onClick={() => handleCommitProductDirection('col', 5)}
+                  className="px-3 py-1.5 text-xs rounded bg-yellow-700 hover:bg-yellow-600 text-white transition-colors"
+                >
+                  5 in Column (same color) — {currentPlayer.corporationStyle === 'product' ? '5 VP + $5' : '7 VP + $3'}
                 </button>
               </div>
             </div>
@@ -847,6 +871,12 @@ export function ActionDraftPhase() {
                     debtLevel.blocksDevelopment &&
                     (action.id === 'develop-features' || action.id === 'optimize-code');
 
+                  // Map occupying player IDs to their colors for the slot indicator
+                  const occupyingColors = slotInfo.players.map((pid) => {
+                    const p = players.find((pl) => pl.id === pid);
+                    return p?.color ?? '#666';
+                  });
+
                   return (
                     <ActionSpaceCard
                       key={action.id}
@@ -859,7 +889,7 @@ export function ActionDraftPhase() {
                       isAvailable={isAvailable}
                       isBlockedByDebt={isBlockedByDebt}
                       allPlayerEngineers={buildAllPlayerEngineers(action.id)}
-                      playerColors={players.map((p) => p.color)}
+                      playerColors={occupyingColors}
                     />
                   );
                 })}
@@ -1136,7 +1166,14 @@ export function ActionDraftPhase() {
 
       {/* ===== DEVELOP FEATURES TOKEN PICKER ===== */}
       <AnimatePresence>
-        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' && (
+        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' && (() => {
+          const pickState = turnState.tokenPickState;
+          const picksRemaining = pickState?.picksRemaining ?? 1;
+          const maxPicks = pickState?.maxPicks ?? 1;
+          const specialtyColor = pickState?.specialtyColor;
+          const filterColor = specialtyColor; // only show tokens of this color if set
+
+          return (
           <motion.div
             key="develop-features-overlay"
             initial={{ opacity: 0 }}
@@ -1152,11 +1189,36 @@ export function ActionDraftPhase() {
             >
               {/* Title */}
               <h2 className="text-lg font-bold text-white mb-1">
-                Develop Features — Pick a Token
+                Develop Features — Pick {maxPicks > 1 ? `${maxPicks} Tokens` : 'a Token'}
               </h2>
-              <p className="text-sm text-gray-400 mb-4">
-                Select a token from the shared pool, then click an empty cell on your grid to place it.
+              <p className="text-sm text-gray-400 mb-2">
+                {specialtyColor
+                  ? `Specialty match! Pick ${maxPicks} ${specialtyColor} tokens from the pool.`
+                  : `Pick ${maxPicks > 1 ? `up to ${maxPicks} tokens` : 'a token'} of any color from the pool.`}
               </p>
+
+              {/* Picks remaining indicator */}
+              {maxPicks > 1 && (
+                <div className="mb-4 flex items-center gap-3 bg-gray-700/50 rounded-lg px-4 py-2">
+                  <span className="text-sm text-gray-300">Picks remaining:</span>
+                  <div className="flex gap-1">
+                    {Array.from({ length: maxPicks }).map((_, i) => (
+                      <div
+                        key={i}
+                        className={`w-4 h-4 rounded-full ${
+                          i < picksRemaining ? 'bg-indigo-500' : 'bg-gray-600'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-sm font-bold text-indigo-400">
+                    {picksRemaining}/{maxPicks}
+                  </span>
+                  {pickState?.useAi && (
+                    <Badge variant="warning" size="sm">AI Active</Badge>
+                  )}
+                </div>
+              )}
 
               {/* Selected token indicator */}
               {selectedTokenIndex !== null && roundState.codePool[selectedTokenIndex] && (
@@ -1184,6 +1246,11 @@ export function ActionDraftPhase() {
                   </span>
                   <span className="text-sm font-semibold text-gray-200">
                     Pick a token from the pool
+                    {filterColor && (
+                      <span className="ml-1 text-xs text-gray-400">
+                        ({filterColor} only)
+                      </span>
+                    )}
                   </span>
                 </div>
                 <CodePoolView
@@ -1191,6 +1258,7 @@ export function ActionDraftPhase() {
                   onSelectToken={(index) => setSelectedTokenIndex(index)}
                   selectedIndices={selectedTokenIndex !== null ? [selectedTokenIndex] : []}
                   maxSelectable={1}
+                  filterColor={filterColor}
                 />
               </div>
 
@@ -1234,9 +1302,22 @@ export function ActionDraftPhase() {
                   />
                 </div>
               </div>
+
+              {/* Done button for multi-pick (skip remaining picks) */}
+              {maxPicks > 1 && picksRemaining < maxPicks && picksRemaining > 0 && (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={() => completeInteractiveAction()}
+                    className="px-4 py-2 rounded bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium transition-colors"
+                  >
+                    Done (skip remaining {picksRemaining} pick{picksRemaining > 1 ? 's' : ''})
+                  </button>
+                </div>
+              )}
             </motion.div>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* ===== OPTIMIZE CODE MINI-GAME ===== */}
