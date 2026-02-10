@@ -29,13 +29,15 @@ describe('generateCodePool', () => {
   });
 
   it('has roughly correct distribution over many samples', () => {
-    // Generate a large pool to check distribution
-    const pool = generateCodePool(20); // 100 tokens
+    // Generate a large pool to check distribution (1000 tokens for statistical reliability)
     const counts: Record<TokenColor, number> = { green: 0, orange: 0, blue: 0, purple: 0 };
-    for (const token of pool) {
-      counts[token]++;
+    for (let i = 0; i < 10; i++) {
+      const pool = generateCodePool(20); // 100 tokens per iteration
+      for (const token of pool) {
+        counts[token]++;
+      }
     }
-    // Green should be most common (~30%), blue least (~20%)
+    // Green should be most common (~30%), blue least (~20%) over 1000 tokens
     expect(counts.green).toBeGreaterThan(counts.blue);
   });
 });
