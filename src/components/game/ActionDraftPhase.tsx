@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../state/gameStore';
 import { getAvailableActions } from '../../data/actions';
 import { CodeGridView } from '../ui/CodeGridView';
@@ -10,6 +10,7 @@ import { ActionSpaceCard } from '../ui/ActionSpaceCard';
 import { EngineerToken } from '../ui/EngineerToken';
 import { AiAugmentationModal } from '../ui/AiAugmentationModal';
 import { Badge, Tooltip } from '../ui';
+import { TOKEN_COLORS_MAP, TOKEN_LABELS } from '../ui/tokenConstants';
 import type { ActionType } from '../../types';
 import { getTechDebtLevel } from '../../types';
 
@@ -36,6 +37,7 @@ export function ActionDraftPhase() {
   const endTurn = useGameStore((s) => s.endTurn);
   const claimAppCard = useGameStore((s) => s.claimAppCard);
   const startActionDraft = useGameStore((s) => s.startActionDraft);
+  const placeTokenOnGrid = useGameStore((s) => s.placeTokenOnGrid);
 
   // Initialize turn state when entering the action-draft phase
   useEffect(() => {
@@ -51,6 +53,7 @@ export function ActionDraftPhase() {
     engineerId: string;
     actionType: ActionType;
   } | null>(null);
+  const [selectedTokenIndex, setSelectedTokenIndex] = useState<number | null>(null);
 
   // Derive current player from turnState
   const turnState = roundState.turnState;
@@ -611,6 +614,111 @@ export function ActionDraftPhase() {
           (e) => e.id === pendingClaim?.engineerId,
         )}
       />
+
+      {/* ===== DEVELOP FEATURES TOKEN PICKER ===== */}
+      <AnimatePresence>
+        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' && (
+          <motion.div
+            key="develop-features-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gray-800 rounded-xl border border-gray-600 shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+            >
+              {/* Title */}
+              <h2 className="text-lg font-bold text-white mb-1">
+                Develop Features — Pick a Token
+              </h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Select a token from the shared pool, then click an empty cell on your grid to place it.
+              </p>
+
+              {/* Selected token indicator */}
+              {selectedTokenIndex !== null && roundState.codePool[selectedTokenIndex] && (
+                <div className="mb-4 flex items-center gap-3 bg-gray-700/50 rounded-lg px-4 py-2">
+                  <span className="text-sm text-gray-300">Selected:</span>
+                  <div
+                    className={`w-10 h-10 rounded flex items-center justify-center text-sm font-bold text-white ring-2 ring-yellow-400 ${
+                      TOKEN_COLORS_MAP[roundState.codePool[selectedTokenIndex]]
+                    }`}
+                  >
+                    {TOKEN_LABELS[roundState.codePool[selectedTokenIndex]]}
+                  </div>
+                  <span className="text-sm text-yellow-400 font-medium">
+                    {roundState.codePool[selectedTokenIndex].charAt(0).toUpperCase() +
+                      roundState.codePool[selectedTokenIndex].slice(1)}
+                  </span>
+                </div>
+              )}
+
+              {/* Step 1: Code Pool */}
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="bg-indigo-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                    1
+                  </span>
+                  <span className="text-sm font-semibold text-gray-200">
+                    Pick a token from the pool
+                  </span>
+                </div>
+                <CodePoolView
+                  pool={roundState.codePool}
+                  onSelectToken={(index) => setSelectedTokenIndex(index)}
+                  selectedIndices={selectedTokenIndex !== null ? [selectedTokenIndex] : []}
+                  maxSelectable={1}
+                />
+              </div>
+
+              {/* Step 2: Grid */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center ${
+                    selectedTokenIndex !== null
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-600 text-gray-400'
+                  }`}>
+                    2
+                  </span>
+                  <span className={`text-sm font-semibold ${
+                    selectedTokenIndex !== null ? 'text-gray-200' : 'text-gray-500'
+                  }`}>
+                    Place it on an empty cell
+                  </span>
+                </div>
+                <div className="flex justify-center">
+                  <CodeGridView
+                    grid={currentPlayer.codeGrid}
+                    onCellClick={
+                      selectedTokenIndex !== null
+                        ? (row, col) => {
+                            if (currentPlayer.codeGrid.cells[row][col] === null) {
+                              placeTokenOnGrid(currentPlayer.id, selectedTokenIndex, row, col);
+                              setSelectedTokenIndex(null);
+                            }
+                          }
+                        : undefined
+                    }
+                    highlightCells={
+                      selectedTokenIndex !== null
+                        ? currentPlayer.codeGrid.cells.flatMap((row, r) =>
+                            row.map((cell, c) => (cell === null ? { row: r, col: c } : null))
+                              .filter((v): v is { row: number; col: number } => v !== null)
+                          )
+                        : []
+                    }
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

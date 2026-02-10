@@ -258,11 +258,13 @@ interface GameStore extends GameState {
   startActionDraft: () => void;
   endTurn: () => void;
   completeInteractiveAction: () => void;
+  placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => void;
 
   // Grid redesign: App and code actions
   publishApp: (playerId: string, cardId: string, row: number, col: number) => void;
   claimAppCard: (playerId: string, cardId: string) => void;
   commitCode: (playerId: string, row: number, col: number, direction?: 'row' | 'col', count?: number) => void;
+  performGridSwap: (playerId: string, r1: number, c1: number, r2: number, c2: number) => void;
 
   // Utility
   getCurrentPlayer: () => Player | undefined;
@@ -3540,6 +3542,57 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game' || turnState.pendingAction !== 'develop-features') {
+        return state;
+      }
+
+      const pool = state.roundState.codePool;
+      if (tokenIndex < 0 || tokenIndex >= pool.length) return state;
+
+      const playerIndex = state.players.findIndex(p => p.id === playerId);
+      if (playerIndex === -1) return state;
+
+      const player = state.players[playerIndex];
+      const grid = player.codeGrid;
+      if (row < 0 || row >= grid.cells.length || col < 0 || col >= grid.cells[0].length) return state;
+      if (grid.cells[row][col] !== null) return state; // cell must be empty
+
+      const tokenColor = pool[tokenIndex];
+
+      // Build updated pool (remove the token at tokenIndex)
+      const newPool = [...pool];
+      newPool.splice(tokenIndex, 1);
+
+      // Build updated grid (place the token)
+      const newCells = grid.cells.map(r => [...r]);
+      newCells[row][col] = tokenColor;
+
+      const updatedPlayers = state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          codeGrid: { ...p.codeGrid, cells: newCells },
+        };
+      });
+
+      return {
+        players: updatedPlayers,
+        roundState: {
+          ...state.roundState,
+          codePool: newPool,
+          turnState: {
+            ...turnState,
+            phase: 'free-actions' as const,
+            pendingAction: undefined,
+          },
+        },
+      };
+    });
+  },
+
   // ============================================
   // GRID REDESIGN: APP & CODE ACTIONS
   // ============================================
@@ -3712,6 +3765,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }),
       }));
     }
+  },
+
+  performGridSwap: (playerId: string, r1: number, c1: number, r2: number, c2: number) => {
+    set((state) => {
+      const playerIndex = state.players.findIndex(p => p.id === playerId);
+      if (playerIndex === -1) return state;
+      const player = state.players[playerIndex];
+      const cells = player.codeGrid.cells;
+
+      // Both cells must be occupied (non-null)
+      if (cells[r1]?.[c1] == null || cells[r2]?.[c2] == null) return state;
+
+      // Cells must be adjacent (differ by 1 in exactly one dimension)
+      const dr = Math.abs(r1 - r2);
+      const dc = Math.abs(c1 - c2);
+      if (!((dr === 1 && dc === 0) || (dr === 0 && dc === 1))) return state;
+
+      // Perform the swap
+      const newCells = cells.map(row => [...row]);
+      const tmp = newCells[r1][c1];
+      newCells[r1][c1] = newCells[r2][c2];
+      newCells[r2][c2] = tmp;
+
+      return {
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            codeGrid: { ...p.codeGrid, cells: newCells },
+          };
+        }),
+      };
+    });
   },
 
   // ============================================
