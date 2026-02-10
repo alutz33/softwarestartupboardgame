@@ -54,6 +54,7 @@ import { shuffleThemes, getThemeForRound } from '../data/quarters';
 import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
 import { generateCodePool } from '../data/codePool';
 import { createAppCardDeck } from '../data/appCards';
+import { expandGrid } from './gridHelpers';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -2145,6 +2146,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
                 0,
                 newResources.techDebt - debtReduction
               );
+              // Grid redesign: also remove tokens from tech debt buffer
+              const tokensToRemove = 2;
+              const removeCount = Math.min(tokensToRemove, player.techDebtBuffer.tokens.length);
+              player.techDebtBuffer.tokens.splice(0, removeCount);
               break;
             }
 
@@ -2160,6 +2165,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
               }
               // +5 server capacity (flat, not scaled by power for infrastructure)
               newResources.serverCapacity += 5;
+              // Grid redesign: also expand the code grid
+              if (player.codeGrid.expansionLevel < 2) {
+                const expanded = expandGrid(player.codeGrid);
+                if (expanded) {
+                  player.codeGrid = expanded;
+                }
+              }
               break;
 
             case 'research-ai': {
@@ -2177,6 +2189,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
               // LEADER PASSIVE: gpu-royalties (Jensen Wattson) - Research AI gives +1 AI capacity
               if (player.leader?.leaderSide.passive.id === 'gpu-royalties') {
                 newResources.aiCapacity += 1;
+              }
+              // Grid redesign: advance AI research level (0 → 1 → 2)
+              if (player.aiResearchLevel < 2) {
+                player.aiResearchLevel = (player.aiResearchLevel + 1) as AIResearchLevel;
               }
               break;
             }
