@@ -30,6 +30,7 @@ import {
   getAiDebt,
   createEmptyGrid,
   createEmptyBuffer,
+  MAU_MILESTONES,
 } from '../types';
 import {
   FUNDING_OPTIONS,
@@ -719,10 +720,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: finalPlayers,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             personaPool: updatedPersonaPool,
             personaAuction: undefined,
             draftPhase: 'complete' as DraftPhase,
@@ -818,10 +819,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: finalPlayers,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             personaPool: updatedPersonaPool,
             personaAuction: undefined,
             draftPhase: 'complete' as DraftPhase,
@@ -1152,10 +1153,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const playersReady = state.players.map(p => ({ ...p, isReady: false }));
         return {
           players: playersReady,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
             ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersReady) } : {}),
@@ -1296,10 +1297,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       return {
         players: playersWithReadyReset,
-        phase: 'planning' as GamePhase,
+        phase: 'action-draft' as GamePhase,
         roundState: {
           ...state.roundState,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           bidResults,
           currentBids: new Map(),
           occupiedActions: new Map(), // Reset for new planning phase
@@ -1444,13 +1445,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: playersWithReadyReset,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
             engineerPool: updatedPool,
             draftPhase: 'complete' as DraftPhase,
             currentDraftPickerIndex: nextPickerIndex,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
             ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersWithReadyReset) } : {}),
@@ -1988,6 +1989,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         let newProduction = { ...player.productionTracks };
         let hasRecruiterBonus = player.hasRecruiterBonus;
         let ipoBonusScore = player.ipoBonusScore || 0;
+        let newMarketingStarBonus = player.marketingStarBonus;
+        let newRecurringRevenue = player.recurringRevenue;
 
         // Determine the last action for "night-owl" trait bonus
         const lastActionIndex = player.plannedActions.length - 1;
@@ -2303,6 +2306,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   newProduction.mauProduction + 1
                 );
               }
+
+              // GRID REDESIGN: Corporation-type marketing effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: +1 star bonus (consumed when publishing an app)
+                newMarketingStarBonus += 1;
+              } else if (player.corporationStyle === 'product') {
+                // Product: advance MAU production track by 1
+                newProduction.mauProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                  newProduction.mauProduction + 1
+                );
+              }
+
               break;
             }
 
@@ -2353,6 +2369,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   newProduction.revenueProduction + 1
                 );
               }
+
+              // GRID REDESIGN: Corporation-type monetization effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: earn $1 per star across all published apps
+                const totalStars = player.publishedApps.reduce((sum, app) => sum + app.stars, 0);
+                newResources.money += totalStars;
+              } else if (player.corporationStyle === 'product') {
+                // Product: +1 recurring revenue ($1 more per round from now on)
+                newRecurringRevenue += 1;
+              }
+
               break;
             }
 
@@ -2546,6 +2573,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           isReady: false,
           plannedActions: [],
           ipoBonusScore,
+          marketingStarBonus: newMarketingStarBonus,
+          recurringRevenue: newRecurringRevenue,
           engineers: player.engineers.map((e) => ({
             ...e,
             assignedAction: undefined,
@@ -2724,6 +2753,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const mauGain = effectiveMauProd * PRODUCTION_CONSTANTS.MAU_PER_PRODUCTION;
       const moneyGain = effectiveRevProd * PRODUCTION_CONSTANTS.MONEY_PER_PRODUCTION;
 
+      // Product corporation recurring revenue from committed code
+      const recurringIncome = p.corporationStyle === 'product' ? p.recurringRevenue : 0;
+
       return {
         ...p,
         metrics: {
@@ -2732,7 +2764,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
         resources: {
           ...p.resources,
-          money: p.resources.money + moneyGain,
+          money: p.resources.money + moneyGain + recurringIncome,
         },
         hasRecruiterBonus: false, // Reset recruiter bonus
         commitCodeUsedThisRound: false, // Reset commit code flag
@@ -2781,21 +2813,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const scores = new Map<string, number>();
 
     for (const player of state.players) {
-      // Base score from metrics
       let score = 0;
 
-      // MAU score (1 point per 1000 MAU)
-      score += player.metrics.mau / 1000;
+      if (player.corporationStyle === 'agency') {
+        // Agency scoring: VP from published app stars
+        for (const app of player.publishedApps) {
+          score += app.vpEarned;
+        }
+      } else {
+        // Product scoring: VP from MAU milestones (unclaimed only)
+        for (const ms of MAU_MILESTONES) {
+          if (
+            player.metrics.mau >= ms.threshold &&
+            !player.mauMilestonesClaimed.includes(ms.id)
+          ) {
+            score += ms.vp;
+          }
+        }
 
-      // Revenue score (1 point per 500 revenue)
-      let revenueMultiplier = 1;
-      if (player.strategy?.funding === 'bootstrapped') {
-        revenueMultiplier = 1.3; // Bootstrapped gets 1.3x revenue scoring
+        // VP from committed code count: 1 VP per 2 committed codes
+        score += Math.floor(player.committedCodeCount / 2);
       }
-      score += (player.metrics.revenue / 500) * revenueMultiplier;
 
-      // Rating score (3 points per rating point on 1-10 scale, max 30)
-      score += player.metrics.rating * 3;
+      // Both types: money conversion (1 VP per $10 remaining)
+      score += Math.floor(player.resources.money / 10);
 
       // MILESTONE BONUSES - Add points for claimed milestones
       for (const milestone of state.milestones) {
@@ -2804,48 +2845,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }
       }
 
-      // LATE-GAME ACTION BONUSES (IPO Prep, Acquisition Target)
+      // IPO / Acquisition bonus
       score += player.ipoBonusScore || 0;
-
-      // Synergy bonuses for specialization
-      // MAU specialist: 50+ points if MAU > all others by 50%
-      // Revenue specialist: 50+ points if revenue > all others by 50%
-      // Rating specialist: 50+ points if rating > all others by 0.5
-
-      // Tech debt penalty (graduated)
-      // 0-3 debt: no penalty
-      // 4-7 debt: -5 points
-      // 8-11 debt: -10 points
-      // 12+ debt: -20 points
-      const techDebt = player.resources.techDebt;
-      if (techDebt >= 12) {
-        score -= 20;
-      } else if (techDebt >= 8) {
-        score -= 10;
-      } else if (techDebt >= 4) {
-        score -= 5;
-      }
-
-      // Production track bonus: +1 per MAU production level, +2 per revenue production level
-      score += player.productionTracks.mauProduction * 1;
-      score += player.productionTracks.revenueProduction * 2;
-
-      // Grid system scoring (published apps)
-      let gridScore = 0;
-      for (const app of player.publishedApps) {
-        gridScore += app.vpEarned;
-      }
-      // TODO: Add commit code VP for product corporations
-      // TODO: Add money conversion (1 VP per $X remaining)
-      // TODO: Remove old MAU/revenue/rating formula once grid system is complete
-      score += gridScore;
-
-      // Score is now directly calculated without equity multiplier.
-      // Funding balance comes from starting resources and unique powers:
-      // VC-Heavy: $100 start + pivot power
-      // Angel: $70 start + insider info
-      // Bootstrapped: $40 start + lean team + 1.5x revenue scoring
-      score = Math.round(score);
 
       scores.set(player.id, score);
     }
@@ -3096,6 +3097,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           let newResources = { ...player.resources };
           let newMetrics = { ...player.metrics };
           let newProduction = { ...player.productionTracks };
+          let newMarketingStarBonus = player.marketingStarBonus;
+          let newRecurringRevenue = player.recurringRevenue;
 
           // Generate tech debt from AI usage
           if (effectiveUseAi) {
@@ -3185,6 +3188,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
                     PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction + 1
                   );
                 }
+
+                // GRID REDESIGN: Corporation-type marketing effects
+                if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                  // Agency: +1 star bonus (consumed when publishing an app)
+                  newMarketingStarBonus += 1;
+                } else if (player.corporationStyle === 'product') {
+                  // Product: advance MAU production track by 1
+                  newProduction.mauProduction = Math.min(
+                    PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                    newProduction.mauProduction + 1
+                  );
+                }
               }
               break;
             }
@@ -3215,6 +3230,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction + 1
                 );
               }
+
+              // GRID REDESIGN: Corporation-type monetization effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: earn $1 per star across all published apps
+                const totalStars = player.publishedApps.reduce((sum, app) => sum + app.stars, 0);
+                newResources.money += totalStars;
+              } else if (player.corporationStyle === 'product') {
+                // Product: +1 recurring revenue ($1 more per round from now on)
+                newRecurringRevenue += 1;
+              }
+
               break;
             }
 
@@ -3253,6 +3279,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
               resources: newResources,
               metrics: newMetrics,
               productionTracks: newProduction,
+              marketingStarBonus: newMarketingStarBonus,
+              recurringRevenue: newRecurringRevenue,
             };
           });
 

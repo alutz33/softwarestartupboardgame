@@ -1,91 +1,65 @@
 import { describe, it, expect } from 'vitest';
 import { useGameStore } from '../gameStore';
 
-describe('calculateWinner - grid scoring', () => {
-  it('includes published app VP in final score', () => {
+describe('calculateWinner - dual scoring', () => {
+  it('agency scores VP from published apps', () => {
     useGameStore.getState().initGame(2, 'sequential');
-
     const state = useGameStore.getState();
     const players = state.players.map((p, i) => {
       if (i === 0) {
         return {
           ...p,
+          corporationStyle: 'agency' as const,
           publishedApps: [
-            { cardId: 'test1', name: 'Test App 1', stars: 5, vpEarned: 3, moneyEarned: 2 },
-            { cardId: 'test2', name: 'Test App 2', stars: 3, vpEarned: 1, moneyEarned: 1 },
+            { cardId: 't1', name: 'App1', stars: 5, vpEarned: 3, moneyEarned: 2 },
+            { cardId: 't2', name: 'App2', stars: 3, vpEarned: 1, moneyEarned: 1 },
           ],
+          resources: { ...p.resources, money: 20 }, // +2 VP from money
         };
       }
       return {
         ...p,
+        corporationStyle: 'agency' as const,
         publishedApps: [],
+        resources: { ...p.resources, money: 0 },
       };
     });
     useGameStore.setState({ players });
-
     useGameStore.getState().calculateWinner();
-
     const result = useGameStore.getState();
     const p1Score = result.finalScores?.get(result.players[0].id) || 0;
     const p2Score = result.finalScores?.get(result.players[1].id) || 0;
-    // Player 1 should have higher score due to published app VP (3 + 1 = 4 extra)
-    expect(p1Score).toBeGreaterThan(p2Score);
+    // P1: 3+1 VP from apps + 2 VP from money = 6
+    expect(p1Score).toBe(6);
+    expect(p2Score).toBe(0);
   });
 
-  it('sums VP from multiple published apps', () => {
+  it('product scores VP from MAU milestones and committed code', () => {
     useGameStore.getState().initGame(2, 'sequential');
-
     const state = useGameStore.getState();
     const players = state.players.map((p, i) => {
       if (i === 0) {
         return {
           ...p,
-          publishedApps: [
-            { cardId: 'a1', name: 'App A', stars: 5, vpEarned: 5, moneyEarned: 3 },
-            { cardId: 'a2', name: 'App B', stars: 4, vpEarned: 3, moneyEarned: 2 },
-            { cardId: 'a3', name: 'App C', stars: 2, vpEarned: 1, moneyEarned: 0 },
-          ],
+          corporationStyle: 'product' as const,
+          metrics: { ...p.metrics, mau: 3000 }, // past 1k (1VP) and 2.5k (2VP) milestones
+          committedCodeCount: 5, // floor(5/2) = 2 VP
+          resources: { ...p.resources, money: 10 }, // +1 VP from money
         };
       }
-      if (i === 1) {
-        return {
-          ...p,
-          publishedApps: [
-            { cardId: 'b1', name: 'App D', stars: 3, vpEarned: 2, moneyEarned: 1 },
-          ],
-        };
-      }
-      return p;
+      return {
+        ...p,
+        corporationStyle: 'product' as const,
+        metrics: { ...p.metrics, mau: 0 },
+        committedCodeCount: 0,
+        resources: { ...p.resources, money: 0 },
+      };
     });
     useGameStore.setState({ players });
-
     useGameStore.getState().calculateWinner();
-
     const result = useGameStore.getState();
     const p1Score = result.finalScores?.get(result.players[0].id) || 0;
-    const p2Score = result.finalScores?.get(result.players[1].id) || 0;
-    // Player 1: 5+3+1 = 9 grid VP, Player 2: 2 grid VP
-    // Difference should be at least 7 (the grid VP difference)
-    expect(p1Score - p2Score).toBeGreaterThanOrEqual(7);
-  });
-
-  it('still works when no apps are published', () => {
-    useGameStore.getState().initGame(2, 'sequential');
-
-    const state = useGameStore.getState();
-    const players = state.players.map((p) => ({
-      ...p,
-      publishedApps: [],
-    }));
-    useGameStore.setState({ players });
-
-    useGameStore.getState().calculateWinner();
-
-    const result = useGameStore.getState();
-    expect(result.finalScores).toBeDefined();
-    // Both players should have equal scores (same starting conditions, no apps)
-    const p1Score = result.finalScores?.get(result.players[0].id) || 0;
-    const p2Score = result.finalScores?.get(result.players[1].id) || 0;
-    expect(p1Score).toBe(p2Score);
+    // P1: 1+2 from milestones + 2 from code + 1 from money = 6
+    expect(p1Score).toBe(6);
   });
 });
