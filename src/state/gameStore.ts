@@ -54,7 +54,8 @@ import { shuffleThemes, getThemeForRound } from '../data/quarters';
 import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
 import { generateCodePool } from '../data/codePool';
 import { createAppCardDeck } from '../data/appCards';
-import { expandGrid } from './gridHelpers';
+import { expandGrid, matchPatternAtPosition, clearPatternFromGrid } from './gridHelpers';
+import { getStarRating } from '../data/appCards';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -213,6 +214,11 @@ interface GameStore extends GameState {
   // Sequential action draft
   claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => void;
   advanceSequentialDraft: () => void;
+
+  // Grid redesign: App and code actions
+  publishApp: (playerId: string, cardId: string, row: number, col: number) => void;
+  claimAppCard: (playerId: string, cardId: string) => void;
+  commitCode: (playerId: string, row: number, col: number, direction?: 'row' | 'col', count?: number) => void;
 
   // Utility
   getCurrentPlayer: () => Player | undefined;
@@ -3013,6 +3019,163 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       };
     });
+  },
+
+  // ============================================
+  // GRID REDESIGN: APP & CODE ACTIONS
+  // ============================================
+
+  publishApp: (playerId: string, cardId: string, row: number, col: number) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Find the card in player's hand
+    const cardIndex = player.heldAppCards.findIndex(c => c.id === cardId);
+    if (cardIndex === -1) return;
+    const card = player.heldAppCards[cardIndex];
+
+    // Count matched tokens at the given position
+    const matched = matchPatternAtPosition(player.codeGrid, card.pattern, row, col);
+    const stars = getStarRating(card, matched);
+
+    // Calculate VP and money based on star fraction
+    const vpEarned = Math.floor(card.maxVP * (stars / 5));
+    const moneyEarned = Math.floor(card.maxMoney * (stars / 5));
+
+    // Clear matched pattern cells from grid
+    const newGrid = clearPatternFromGrid(player.codeGrid, card.pattern, row, col);
+
+    // Remove card from hand
+    const newHeldCards = [...player.heldAppCards];
+    newHeldCards.splice(cardIndex, 1);
+
+    const publishedApp = {
+      cardId: card.id,
+      name: card.name,
+      stars,
+      vpEarned,
+      moneyEarned,
+    };
+
+    set((state) => ({
+      players: state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          publishedApps: [...p.publishedApps, publishedApp],
+          resources: { ...p.resources, money: p.resources.money + moneyEarned },
+          codeGrid: newGrid,
+          heldAppCards: newHeldCards,
+        };
+      }),
+    }));
+  },
+
+  claimAppCard: (playerId: string, cardId: string) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Enforce hand limit of 3
+    if (player.heldAppCards.length >= 3) return;
+
+    // Find card in market
+    const marketIndex = state.roundState.appMarket.findIndex(c => c.id === cardId);
+    if (marketIndex === -1) return;
+    const card = state.roundState.appMarket[marketIndex];
+
+    // Remove card from market
+    const newMarket = [...state.roundState.appMarket];
+    newMarket.splice(marketIndex, 1);
+
+    // Refill market from deck
+    const newDeck = [...state.appCardDeck];
+    if (newDeck.length > 0) {
+      newMarket.push(newDeck.shift()!);
+    }
+
+    set((state) => ({
+      players: state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          heldAppCards: [...p.heldAppCards, card],
+        };
+      }),
+      roundState: {
+        ...state.roundState,
+        appMarket: newMarket,
+      },
+      appCardDeck: newDeck,
+    }));
+  },
+
+  commitCode: (playerId: string, row: number, col: number, direction?: 'row' | 'col', count?: number) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Cannot commit twice in same round
+    if (player.commitCodeUsedThisRound) return;
+
+    const style = player.corporationStyle;
+
+    if (style === 'agency') {
+      // Agency: remove 1 token at (row, col)
+      const cell = player.codeGrid.cells[row]?.[col];
+      if (cell === null || cell === undefined) return;
+
+      const newCells = player.codeGrid.cells.map(r => [...r]);
+      newCells[row][col] = null;
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            codeGrid: { ...p.codeGrid, cells: newCells },
+          };
+        }),
+      }));
+    } else if (style === 'product') {
+      // Product: validate 3-same-color pattern in direction, clear and give $1
+      const requiredCount = count || 3;
+      const cells = player.codeGrid.cells;
+      const startColor = cells[row]?.[col];
+      if (startColor === null || startColor === undefined) return;
+
+      // Validate all tokens in the line are same color
+      const positions: Array<{ r: number; c: number }> = [];
+      for (let i = 0; i < requiredCount; i++) {
+        const r = direction === 'col' ? row + i : row;
+        const c = direction === 'row' ? col + i : col;
+        if (r >= cells.length || c >= cells[0].length) return;
+        if (cells[r][c] !== startColor) return;
+        positions.push({ r, c });
+      }
+
+      const newCells = cells.map(r => [...r]);
+      for (const pos of positions) {
+        newCells[pos.r][pos.c] = null;
+      }
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            resources: { ...p.resources, money: p.resources.money + 1 },
+            codeGrid: { ...p.codeGrid, cells: newCells },
+          };
+        }),
+      }));
+    }
   },
 
   // ============================================
