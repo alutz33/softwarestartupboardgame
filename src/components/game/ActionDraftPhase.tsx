@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../state/gameStore';
 import { getAvailableActions } from '../../data/actions';
@@ -13,6 +13,45 @@ import { Badge, Tooltip } from '../ui';
 import { TOKEN_COLORS_MAP, TOKEN_LABELS } from '../ui/tokenConstants';
 import type { ActionType } from '../../types';
 import { getTechDebtLevel } from '../../types';
+
+// ---- Optimize-Code Mini-Game Types ----
+
+type OptimizeToken = '+1 Swap' | '+2 Swap' | 'Bug!' | 'Critical Bug!';
+
+const OPTIMIZE_BAG: OptimizeToken[] = [
+  '+1 Swap', '+1 Swap', '+1 Swap', '+2 Swap',
+  'Bug!', 'Bug!', 'Critical Bug!',
+];
+
+interface OptimizeMiniGameState {
+  phase: 'drawing' | 'swapping' | 'done';
+  bag: OptimizeToken[];
+  drawnTokens: OptimizeToken[];
+  swapsEarned: number;
+  bugCount: number;
+  busted: boolean;
+  swapsRemaining: number;
+  selectedSwapCell: { row: number; col: number } | null;
+}
+
+function createOptimizeMiniGame(): OptimizeMiniGameState {
+  // Shuffle the bag
+  const bag = [...OPTIMIZE_BAG];
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+  return {
+    phase: 'drawing',
+    bag,
+    drawnTokens: [],
+    swapsEarned: 0,
+    bugCount: 0,
+    busted: false,
+    swapsRemaining: 0,
+    selectedSwapCell: null,
+  };
+}
 
 /**
  * ActionDraftPhase — the main game screen that replaces the old
@@ -38,6 +77,8 @@ export function ActionDraftPhase() {
   const claimAppCard = useGameStore((s) => s.claimAppCard);
   const startActionDraft = useGameStore((s) => s.startActionDraft);
   const placeTokenOnGrid = useGameStore((s) => s.placeTokenOnGrid);
+  const performGridSwap = useGameStore((s) => s.performGridSwap);
+  const completeInteractiveAction = useGameStore((s) => s.completeInteractiveAction);
 
   // Initialize turn state when entering the action-draft phase
   useEffect(() => {
@@ -55,8 +96,26 @@ export function ActionDraftPhase() {
   } | null>(null);
   const [selectedTokenIndex, setSelectedTokenIndex] = useState<number | null>(null);
 
+  // Optimize-code mini-game state
+  const [optimizeGame, setOptimizeGame] = useState<OptimizeMiniGameState | null>(null);
+
   // Derive current player from turnState
   const turnState = roundState.turnState;
+
+  // Initialize optimize mini-game when entering mini-game phase for optimize-code
+  useEffect(() => {
+    if (
+      turnState?.phase === 'mini-game' &&
+      turnState?.pendingAction === 'optimize-code' &&
+      !optimizeGame
+    ) {
+      setOptimizeGame(createOptimizeMiniGame());
+    }
+    // Reset when leaving mini-game
+    if (turnState?.phase !== 'mini-game' || turnState?.pendingAction !== 'optimize-code') {
+      if (optimizeGame) setOptimizeGame(null);
+    }
+  }, [turnState?.phase, turnState?.pendingAction, optimizeGame]);
   const turnIndex = turnState?.currentPlayerIndex ?? 0;
 
   // The snake order is built by VP inside the store; we approximate here by
@@ -155,6 +214,122 @@ export function ActionDraftPhase() {
     setSelectedEngineerId(null);
     endTurn();
   };
+
+  // ---- Optimize-Code Mini-Game Handlers ----
+
+  const handleOptimizeDraw = useCallback(() => {
+    setOptimizeGame((prev) => {
+      if (!prev || prev.phase !== 'drawing' || prev.bag.length === 0) return prev;
+
+      const newBag = [...prev.bag];
+      const drawn = newBag.pop()!;
+      const newDrawn = [...prev.drawnTokens, drawn];
+
+      let newSwaps = prev.swapsEarned;
+      let newBugs = prev.bugCount;
+
+      if (drawn === '+1 Swap') {
+        newSwaps += 1;
+      } else if (drawn === '+2 Swap') {
+        newSwaps += 2;
+      } else if (drawn === 'Bug!') {
+        newBugs += 1;
+      } else if (drawn === 'Critical Bug!') {
+        newBugs += 2; // Critical bug counts as 2 bugs
+      }
+
+      // Check for bust: 2+ bugs = bust
+      if (newBugs >= 2) {
+        return {
+          ...prev,
+          bag: newBag,
+          drawnTokens: newDrawn,
+          swapsEarned: 0,
+          bugCount: newBugs,
+          busted: true,
+          phase: 'done' as const,
+          swapsRemaining: 0,
+          selectedSwapCell: null,
+        };
+      }
+
+      // If bag is empty, auto-stop with swaps
+      if (newBag.length === 0) {
+        return {
+          ...prev,
+          bag: newBag,
+          drawnTokens: newDrawn,
+          swapsEarned: newSwaps,
+          bugCount: newBugs,
+          busted: false,
+          phase: newSwaps > 0 ? 'swapping' as const : 'done' as const,
+          swapsRemaining: newSwaps,
+          selectedSwapCell: null,
+        };
+      }
+
+      return {
+        ...prev,
+        bag: newBag,
+        drawnTokens: newDrawn,
+        swapsEarned: newSwaps,
+        bugCount: newBugs,
+      };
+    });
+  }, []);
+
+  const handleOptimizeStop = useCallback(() => {
+    setOptimizeGame((prev) => {
+      if (!prev || prev.phase !== 'drawing') return prev;
+      return {
+        ...prev,
+        phase: prev.swapsEarned > 0 ? 'swapping' as const : 'done' as const,
+        swapsRemaining: prev.swapsEarned,
+        selectedSwapCell: null,
+      };
+    });
+  }, []);
+
+  const handleSwapCellClick = useCallback((row: number, col: number) => {
+    if (!optimizeGame || optimizeGame.phase !== 'swapping') return;
+
+    const grid = currentPlayer.codeGrid;
+    // Cell must be occupied
+    if (grid.cells[row]?.[col] == null) return;
+
+    if (!optimizeGame.selectedSwapCell) {
+      // First selection
+      setOptimizeGame((prev) => prev ? { ...prev, selectedSwapCell: { row, col } } : prev);
+    } else {
+      // Second selection — check adjacency and perform swap
+      const first = optimizeGame.selectedSwapCell;
+      const dr = Math.abs(first.row - row);
+      const dc = Math.abs(first.col - col);
+      const isAdjacent = (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+
+      if (isAdjacent && (first.row !== row || first.col !== col)) {
+        performGridSwap(currentPlayer.id, first.row, first.col, row, col);
+        setOptimizeGame((prev) => {
+          if (!prev) return prev;
+          const remaining = prev.swapsRemaining - 1;
+          return {
+            ...prev,
+            swapsRemaining: remaining,
+            selectedSwapCell: null,
+            phase: remaining <= 0 ? 'done' as const : 'swapping' as const,
+          };
+        });
+      } else {
+        // Not adjacent or same cell — reselect
+        setOptimizeGame((prev) => prev ? { ...prev, selectedSwapCell: { row, col } } : prev);
+      }
+    }
+  }, [optimizeGame, currentPlayer.codeGrid, currentPlayer.id, performGridSwap]);
+
+  const handleOptimizeDone = useCallback(() => {
+    setOptimizeGame(null);
+    completeInteractiveAction();
+  }, [completeInteractiveAction]);
 
   // Get engineers assigned to a specific action (for displaying on action cards)
   const getAssignedEngineers = (actionType: ActionType) => {
@@ -715,6 +890,270 @@ export function ActionDraftPhase() {
                   />
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== OPTIMIZE CODE MINI-GAME ===== */}
+      <AnimatePresence>
+        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'optimize-code' && optimizeGame && (
+          <motion.div
+            key="optimize-code-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gray-800 rounded-xl border border-gray-600 shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+            >
+              {/* Drawing Phase */}
+              {optimizeGame.phase === 'drawing' && (
+                <>
+                  <h2 className="text-lg font-bold text-white mb-1">
+                    Optimize Code — Push Your Luck!
+                  </h2>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Draw tokens to earn grid swaps. But beware — 2 bugs and you bust!
+                  </p>
+
+                  {/* Stats bar */}
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-gray-700 rounded p-3 text-center">
+                      <div className="text-xs text-gray-400 mb-1">Swaps Earned</div>
+                      <div className="text-2xl font-bold text-cyan-400">
+                        {optimizeGame.swapsEarned}
+                      </div>
+                    </div>
+                    <div className="bg-gray-700 rounded p-3 text-center">
+                      <div className="text-xs text-gray-400 mb-1">Bugs</div>
+                      <div className={`text-2xl font-bold ${
+                        optimizeGame.bugCount >= 1 ? 'text-orange-400' : 'text-gray-300'
+                      }`}>
+                        {optimizeGame.bugCount}/2
+                      </div>
+                    </div>
+                    <div className="bg-gray-700 rounded p-3 text-center">
+                      <div className="text-xs text-gray-400 mb-1">Tokens Left</div>
+                      <div className="text-2xl font-bold text-gray-300">
+                        {optimizeGame.bag.length}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drawn tokens */}
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-gray-400 mb-2">Drawn Tokens</div>
+                    <div className="flex flex-wrap gap-2 min-h-[56px]">
+                      <AnimatePresence>
+                        {optimizeGame.drawnTokens.map((token, i) => {
+                          const isBug = token === 'Bug!' || token === 'Critical Bug!';
+                          const borderColor = isBug
+                            ? token === 'Critical Bug!' ? 'border-red-600' : 'border-orange-500'
+                            : token === '+2 Swap' ? 'border-teal-500' : 'border-green-500';
+                          const bgColor = isBug
+                            ? token === 'Critical Bug!' ? 'bg-red-900/40' : 'bg-orange-900/30'
+                            : token === '+2 Swap' ? 'bg-teal-900/30' : 'bg-green-900/30';
+                          const textColor = isBug
+                            ? token === 'Critical Bug!' ? 'text-red-400' : 'text-orange-400'
+                            : token === '+2 Swap' ? 'text-teal-400' : 'text-green-400';
+
+                          return (
+                            <motion.div
+                              key={i}
+                              initial={{ scale: 0, rotate: -180 }}
+                              animate={{ scale: 1, rotate: 0 }}
+                              transition={{ type: 'spring', damping: 15 }}
+                              className={`w-16 h-16 rounded-lg border-2 ${borderColor} ${bgColor} flex items-center justify-center`}
+                            >
+                              <span className={`text-xs font-bold ${textColor} text-center leading-tight`}>
+                                {token}
+                              </span>
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                      {optimizeGame.drawnTokens.length === 0 && (
+                        <div className="text-sm text-gray-500 italic flex items-center">
+                          No tokens drawn yet — click Draw Token to begin!
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-4 justify-center">
+                    <button
+                      onClick={handleOptimizeDraw}
+                      disabled={optimizeGame.bag.length === 0}
+                      className="px-6 py-3 rounded-lg font-bold text-sm bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Draw Token
+                    </button>
+                    <button
+                      onClick={handleOptimizeStop}
+                      className="px-6 py-3 rounded-lg font-bold text-sm bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+                    >
+                      Stop &amp; Swap
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Bust result */}
+              {optimizeGame.phase === 'done' && optimizeGame.busted && (
+                <>
+                  <div className="text-center mb-4">
+                    <motion.div
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="mb-4 p-4 bg-red-900/50 border-2 border-red-500 rounded-lg"
+                    >
+                      <div className="text-3xl font-bold text-red-400 mb-1">
+                        BUST!
+                      </div>
+                      <p className="text-red-300 text-sm">
+                        Too many bugs! All swaps lost.
+                      </p>
+                    </motion.div>
+
+                    {/* Show drawn tokens */}
+                    <div className="flex flex-wrap gap-2 justify-center mb-4">
+                      {optimizeGame.drawnTokens.map((token, i) => {
+                        const isBug = token === 'Bug!' || token === 'Critical Bug!';
+                        const borderColor = isBug
+                          ? token === 'Critical Bug!' ? 'border-red-600' : 'border-orange-500'
+                          : token === '+2 Swap' ? 'border-teal-500' : 'border-green-500';
+                        const bgColor = isBug
+                          ? token === 'Critical Bug!' ? 'bg-red-900/40' : 'bg-orange-900/30'
+                          : token === '+2 Swap' ? 'bg-teal-900/30' : 'bg-green-900/30';
+                        const textColor = isBug
+                          ? token === 'Critical Bug!' ? 'text-red-400' : 'text-orange-400'
+                          : token === '+2 Swap' ? 'text-teal-400' : 'text-green-400';
+
+                        return (
+                          <div
+                            key={i}
+                            className={`w-14 h-14 rounded-lg border-2 ${borderColor} ${bgColor} flex items-center justify-center`}
+                          >
+                            <span className={`text-[10px] font-bold ${textColor} text-center leading-tight`}>
+                              {token}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      onClick={handleOptimizeDone}
+                      className="px-6 py-3 rounded-lg font-bold text-sm bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Swapping Phase */}
+              {optimizeGame.phase === 'swapping' && (
+                <>
+                  <h2 className="text-lg font-bold text-white mb-1">
+                    Optimize Code — Swap Tokens
+                  </h2>
+                  <p className="text-sm text-gray-400 mb-4">
+                    You have {optimizeGame.swapsRemaining} swap{optimizeGame.swapsRemaining !== 1 ? 's' : ''} remaining.
+                    Click two adjacent tokens to swap them.
+                  </p>
+
+                  {/* Swap counter */}
+                  <div className="mb-4 flex items-center justify-center gap-3">
+                    <div className="bg-cyan-900/30 border border-cyan-500 rounded-lg px-4 py-2">
+                      <span className="text-cyan-400 font-bold text-lg">
+                        {optimizeGame.swapsRemaining}
+                      </span>
+                      <span className="text-cyan-300 text-sm ml-1">
+                        swap{optimizeGame.swapsRemaining !== 1 ? 's' : ''} left
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Selection indicator */}
+                  {optimizeGame.selectedSwapCell && (
+                    <div className="mb-3 text-center text-sm text-yellow-400">
+                      First cell selected at ({optimizeGame.selectedSwapCell.row}, {optimizeGame.selectedSwapCell.col}) — now click an adjacent token to swap.
+                    </div>
+                  )}
+
+                  {/* Grid with swap interaction */}
+                  <div className="flex justify-center mb-4">
+                    <CodeGridView
+                      grid={currentPlayer.codeGrid}
+                      onCellClick={handleSwapCellClick}
+                      highlightCells={
+                        optimizeGame.selectedSwapCell
+                          ? [
+                              optimizeGame.selectedSwapCell,
+                              // Highlight adjacent occupied cells
+                              ...([
+                                { row: optimizeGame.selectedSwapCell.row - 1, col: optimizeGame.selectedSwapCell.col },
+                                { row: optimizeGame.selectedSwapCell.row + 1, col: optimizeGame.selectedSwapCell.col },
+                                { row: optimizeGame.selectedSwapCell.row, col: optimizeGame.selectedSwapCell.col - 1 },
+                                { row: optimizeGame.selectedSwapCell.row, col: optimizeGame.selectedSwapCell.col + 1 },
+                              ].filter(
+                                (c) =>
+                                  c.row >= 0 &&
+                                  c.col >= 0 &&
+                                  c.row < currentPlayer.codeGrid.cells.length &&
+                                  c.col < (currentPlayer.codeGrid.cells[0]?.length ?? 0) &&
+                                  currentPlayer.codeGrid.cells[c.row][c.col] != null
+                              )),
+                            ]
+                          : []
+                      }
+                    />
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      onClick={handleOptimizeDone}
+                      className="px-6 py-3 rounded-lg font-bold text-sm bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+                    >
+                      Done (skip remaining swaps)
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Done without bust and no swaps to use */}
+              {optimizeGame.phase === 'done' && !optimizeGame.busted && (
+                <>
+                  <div className="text-center mb-4">
+                    <h2 className="text-lg font-bold text-white mb-2">
+                      Optimization Complete
+                    </h2>
+                    <p className="text-sm text-gray-400">
+                      {optimizeGame.swapsEarned > 0
+                        ? `You earned ${optimizeGame.swapsEarned} swap${optimizeGame.swapsEarned !== 1 ? 's' : ''} and applied them to your grid.`
+                        : 'No swaps earned this time.'}
+                    </p>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      onClick={handleOptimizeDone}
+                      className="px-6 py-3 rounded-lg font-bold text-sm bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}
