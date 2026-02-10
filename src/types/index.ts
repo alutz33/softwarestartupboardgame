@@ -529,6 +529,9 @@ export interface RoundState {
   // Phase 4: Hybrid auction draft tracking
   draftPhase?: DraftPhase;              // Which sub-phase of the draft we're in
   currentDraftPickerIndex?: number;     // Index into draftOrder for whose turn it is to pick
+  // Grid redesign: shared code pool and app card market
+  codePool: TokenColor[];               // Shared pool of code tokens available this round
+  appMarket: AppCard[];                 // Face-up app cards available for claiming
 }
 
 // ============================================
@@ -576,6 +579,8 @@ export interface GameState {
   // Phase 2: Persona card system
   personaDeck: PersonaCard[];          // Remaining persona cards (shuffled into engineer pool)
   dealtLeaderCards: Map<string, PersonaCard[]>; // playerId -> dealt leader cards (pick 1 of 3)
+  // Grid redesign: app card deck
+  appCardDeck: AppCard[];              // Remaining app cards to deal into market
   winner?: string;
   finalScores?: Map<string, number>;
 }

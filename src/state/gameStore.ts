@@ -52,6 +52,8 @@ import {
 } from '../data/personaCards';
 import { shuffleThemes, getThemeForRound } from '../data/quarters';
 import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
+import { generateCodePool } from '../data/codePool';
+import { createAppCardDeck } from '../data/appCards';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -277,6 +279,8 @@ function createInitialState(): GameState {
       bidResults: [],
       occupiedActions: new Map(),
       draftOrder: [],
+      codePool: [],
+      appMarket: [],
     },
     eventDeck: createEventDeck(),
     usedEvents: [],
@@ -289,6 +293,8 @@ function createInitialState(): GameState {
     // Phase 2: Persona card system
     personaDeck: [],
     dealtLeaderCards: new Map(),
+    // Grid redesign: app card deck
+    appCardDeck: [],
   };
 }
 
@@ -313,8 +319,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { dealtCards: dealtStartupCards, remainingDeck: remainingStartupDeck } =
       dealStartupCards(startupDeck, playerCount, 2);
 
+    // Grid redesign: Create app card deck and deal initial market
+    const appCardDeck = createAppCardDeck();
+    const appMarket = appCardDeck.splice(0, 3);
+
+    const initialState = createInitialState();
     set({
-      ...createInitialState(),
+      ...initialState,
       players,
       phase: 'leader-draft', // Phase 2: Start with leader-draft instead of startup-draft
       startupDeck: remainingStartupDeck,
@@ -323,6 +334,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       dealtLeaderCards,
       quarterlyThemes,
       planningMode: planningMode || 'simultaneous',
+      appCardDeck,
+      roundState: {
+        ...initialState.roundState,
+        codePool: generateCodePool(playerCount),
+        appMarket,
+      },
     });
   },
 
@@ -489,6 +506,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
@@ -970,6 +989,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
@@ -1040,6 +1061,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(players.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
@@ -2656,6 +2679,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // Phase 4: Hybrid auction draft initialization
         draftPhase: 'generic-draft',
         currentDraftPickerIndex: 0,
+        codePool: generateCodePool(state.players.length),
+        appMarket: state.roundState.appMarket,
       },
     });
   },
