@@ -465,6 +465,14 @@ export interface Player {
   hasPivoted: boolean; // Track if VC-Heavy has used their pivot
   // IPO/Acquisition tracking for late-game actions
   ipoBonusScore: number; // Score bonus from IPO Prep action
+  // Grid redesign fields
+  codeGrid: CodeGrid;
+  techDebtBuffer: TechDebtBuffer;
+  aiResearchLevel: AIResearchLevel;
+  publishedApps: PublishedApp[];
+  heldAppCards: AppCard[];
+  corporationStyle?: CorporationStyle;
+  commitCodeUsedThisRound: boolean;
 }
 
 // ============================================

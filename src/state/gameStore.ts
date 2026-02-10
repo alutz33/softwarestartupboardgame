@@ -19,6 +19,7 @@ import type {
   DraftPhase,
   PlanningMode,
   SequentialDraftState,
+  AIResearchLevel,
 } from '../types';
 import {
   TOTAL_QUARTERS,
@@ -27,6 +28,8 @@ import {
   AI_POWER_BONUS,
   getTechDebtLevel,
   getAiDebt,
+  createEmptyGrid,
+  createEmptyBuffer,
 } from '../types';
 import {
   FUNDING_OPTIONS,
@@ -238,6 +241,13 @@ function createInitialPlayer(index: number): Player {
     powerUsesRemaining: 1, // For powers like Pivot (1 use per game)
     hasPivoted: false,
     ipoBonusScore: 0,
+    // Grid redesign fields
+    codeGrid: createEmptyGrid(0),
+    techDebtBuffer: createEmptyBuffer(),
+    aiResearchLevel: 0 as AIResearchLevel,
+    publishedApps: [],
+    heldAppCards: [],
+    commitCodeUsedThisRound: false,
   };
 }
 
