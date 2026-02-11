@@ -1,6 +1,7 @@
 import { Card, CardContent } from './Card';
 import { Badge } from './Badge';
 import { ActionSlotIndicator } from './ActionSlotIndicator';
+import { Tooltip } from './Tooltip';
 import type { HiredEngineer } from '../../types';
 import { ACTION_SPACES } from '../../data/actions';
 
@@ -23,6 +24,10 @@ interface ActionSpaceCardProps {
   allPlayerEngineers?: AllPlayerEngineer[];
   playerColors?: string[];
   isRecommended?: boolean;
+  compact?: boolean;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  isDragOver?: boolean;
 }
 
 export function ActionSpaceCard({
@@ -37,10 +42,83 @@ export function ActionSpaceCard({
   allPlayerEngineers,
   playerColors = [],
   isRecommended,
+  compact = false,
+  onDragOver,
+  onDrop,
+  isDragOver = false,
 }: ActionSpaceCardProps) {
   const isFull = slotInfo.max !== undefined && slotInfo.current >= slotInfo.max && !isAvailable;
   const isDisabled = isFull || isBlockedByDebt;
 
+  // ---- Compact mode: small horizontal card for bottom strip ----
+  if (compact) {
+    return (
+      <Tooltip
+        content={
+          <div className="max-w-xs">
+            <div className="font-semibold text-white mb-1">{action.name}</div>
+            <div className="text-xs text-gray-300">{action.description}</div>
+            {action.requiredResources?.money && (
+              <div className="text-xs text-yellow-400 mt-1">Cost: ${action.requiredResources.money}</div>
+            )}
+          </div>
+        }
+        position="top"
+      >
+        <div
+          onClick={isDisabled ? undefined : onClick}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          className={`
+            flex flex-col gap-0.5 px-2.5 py-1.5 rounded-lg border transition-all shrink-0
+            ${isDragOver && !isDisabled ? 'border-blue-400 bg-blue-900/40 ring-1 ring-blue-400/50' : ''}
+            ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-800/80'}
+            ${!canAfford || isDisabled ? 'opacity-40' : ''}
+            ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:border-gray-500 hover:bg-gray-700/80'}
+            ${isRecommended && !isDisabled ? 'ring-1 ring-yellow-500/40' : ''}
+          `}
+        >
+          {/* Row 1: Name + cost */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-white whitespace-nowrap">{action.name}</span>
+            {action.requiredResources?.money && (
+              <Badge variant="warning" size="sm">${action.requiredResources.money}</Badge>
+            )}
+            {action.effect.triggersMinigame && (
+              <span className="text-[10px] text-indigo-400" title="Triggers Puzzle">P</span>
+            )}
+          </div>
+          {/* Row 2: Slots + assigned engineers */}
+          <div className="flex items-center gap-1.5">
+            <ActionSlotIndicator
+              actionType={action.id}
+              currentOccupancy={slotInfo.current}
+              maxSlots={slotInfo.max}
+              playerColors={playerColors}
+              isAvailableToCurrentPlayer={isAvailable && !isBlockedByDebt}
+            />
+            {allPlayerEngineers && allPlayerEngineers.length > 0 && (
+              <div className="flex gap-0.5">
+                {allPlayerEngineers.map((entry) => (
+                  <div
+                    key={entry.engineer.id}
+                    className="w-3.5 h-3.5 rounded-full border"
+                    style={{
+                      backgroundColor: `${entry.playerColor}40`,
+                      borderColor: entry.playerColor,
+                    }}
+                    title={`${entry.playerName}: ${entry.engineer.name}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Tooltip>
+    );
+  }
+
+  // ---- Full mode: standard card ----
   return (
     <Card
       hoverable={!isDisabled}

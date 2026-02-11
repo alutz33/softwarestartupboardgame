@@ -32,8 +32,9 @@ import {
   createEmptyGrid,
   createEmptyBuffer,
   MAU_MILESTONES,
-  TOKEN_COLORS,
   SPECIALTY_TO_COLOR,
+  randomTokenColor,
+  TECH_DEBT_BUFFER_SIZE,
 } from '../types';
 import type { TokenPickState } from '../types';
 import {
@@ -209,6 +210,9 @@ interface GameStore extends GameState {
   selectFunding: (playerId: string, style: CorporationStyle) => void;
   getDealtLeaderCards: (playerId: string) => PersonaCard[];
 
+  // Phase 2: App card selection (agency players)
+  confirmAppCards: (playerId: string, keptCardIds: string[]) => void;
+
   // Phase 2: Persona auction actions
   startPersonaAuction: (personaCardId: string) => void;
   placeBid: (playerId: string, amount: number) => void;
@@ -268,6 +272,9 @@ interface GameStore extends GameState {
   endTurn: () => void;
   completeInteractiveAction: () => void;
   placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => void;
+
+  // Token pick specialty choice
+  resolveSpecialtyChoice: (playerId: string, useSpecialty: boolean) => void;
 
   // Grid redesign: App and code actions
   publishApp: (playerId: string, cardId: string, row: number, col: number) => void;
@@ -519,6 +526,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
         product: productType,
       };
 
+      // Deal 3 app cards from deck to agency players (held temporarily until confirmed)
+      let dealtCards: typeof state.appCardDeck = [];
+      let newAppCardDeck = state.appCardDeck;
+      if (style === 'agency' && state.appCardDeck.length >= 3) {
+        newAppCardDeck = [...state.appCardDeck];
+        dealtCards = newAppCardDeck.splice(0, 3);
+      }
+
       const updatedPlayers = state.players.map(p => {
         if (p.id !== playerId) return p;
         return {
@@ -528,8 +543,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           resources,
           metrics,
           productionTracks,
-          isReady: true,
+          // Agency players must confirm app cards before being ready
+          isReady: style !== 'agency',
           powerUsesRemaining: 1, // Leader power once per game
+          ...(dealtCards.length > 0 ? { dealtAppCards: dealtCards } : {}),
         };
       });
 
@@ -558,6 +575,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return {
           players: updatedPlayers,
           personaDeck: newPersonaDeck,
+          appCardDeck: newAppCardDeck,
           phase: 'engineer-draft' as GamePhase,
           currentRound: 1,
           currentQuarter: 1,
@@ -581,12 +599,85 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
 
-      return { players: updatedPlayers };
+      return { players: updatedPlayers, appCardDeck: newAppCardDeck };
     });
   },
 
   getDealtLeaderCards: (playerId: string) => {
     return get().dealtLeaderCards.get(playerId) || [];
+  },
+
+  confirmAppCards: (playerId: string, keptCardIds: string[]) => {
+    set((state) => {
+      const player = state.players.find(p => p.id === playerId);
+      if (!player || !player.dealtAppCards || keptCardIds.length < 1) return state;
+
+      const keptCards = player.dealtAppCards.filter(c => keptCardIds.includes(c.id));
+      const returnedCards = player.dealtAppCards.filter(c => !keptCardIds.includes(c.id));
+
+      // Return unkept cards to the bottom of the deck
+      const newDeck = [...state.appCardDeck, ...returnedCards];
+
+      const updatedPlayers = state.players.map(p => {
+        if (p.id !== playerId) return p;
+        return {
+          ...p,
+          heldAppCards: keptCards,
+          dealtAppCards: undefined,
+          isReady: true,
+        };
+      });
+
+      // Check if all players have selected (same logic as selectFunding's allSelected)
+      const allSelected = updatedPlayers.every(p => p.strategy && p.isReady);
+
+      if (allSelected) {
+        // Generate first engineer pool
+        let engineerPool = generateEngineerPool(
+          1,
+          updatedPlayers.length,
+          updatedPlayers.map(p => p.hasRecruiterBonus)
+        );
+
+        // Draw 2 persona cards for the round's persona pool
+        const { drawn: personaPool, remainingDeck: newPersonaDeck } =
+          drawPersonasForRound(state.personaDeck, 2);
+
+        // EVENT FORECASTING: Peek at first quarter's event
+        const eventDeck = [...state.eventDeck];
+        const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
+
+        // Initial draft order is random
+        const draftOrder = updatedPlayers.map(p => p.id);
+
+        return {
+          players: updatedPlayers,
+          personaDeck: newPersonaDeck,
+          appCardDeck: newDeck,
+          phase: 'engineer-draft' as GamePhase,
+          currentRound: 1,
+          currentQuarter: 1,
+          roundState: {
+            roundNumber: 1,
+            phase: 'engineer-draft' as GamePhase,
+            engineerPool,
+            personaPool,
+            currentBids: new Map(),
+            bidResults: [],
+            occupiedActions: new Map(),
+            draftOrder,
+            upcomingEvent,
+            activeTheme: getThemeForRound(state.quarterlyThemes, 1),
+            draftPhase: 'generic-draft' as DraftPhase,
+            currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
+          },
+        };
+      }
+
+      return { players: updatedPlayers, appCardDeck: newDeck };
+    });
   },
 
   // ============================================
@@ -771,8 +862,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         id => !newPassedPlayers.includes(id)
       );
 
-      // If all but one passed (or all passed with no bidder), auction is complete
-      const isComplete = activeBidders.length <= 1;
+      // Auction completes when: nobody remains, OR exactly one remains who already bid (they win)
+      // If one player remains but nobody has bid yet, they still get a chance to bid at base cost
+      const isComplete = activeBidders.length === 0 ||
+        (activeBidders.length === 1 && !!auction.currentBidderId);
 
       // Helper: transition to next persona auction or to planning phase
       const finishAuction = (
@@ -1512,9 +1605,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (!isReassigning && actionSpace.maxWorkers !== undefined) {
         // Count total players occupying this action (not engineers, but players)
         const playersOnAction = new Set(occupied);
+        // Cap to player count since slots track unique players
+        const effectiveMax = Math.min(actionSpace.maxWorkers, state.players.length);
 
         // If this player isn't already on this action, check if there's room
-        if (!playersOnAction.has(playerId) && playersOnAction.size >= actionSpace.maxWorkers) {
+        if (!playersOnAction.has(playerId) && playersOnAction.size >= effectiveMax) {
           // Action space is full - can't assign
           return state;
         }
@@ -2003,6 +2098,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         let ipoBonusScore = player.ipoBonusScore || 0;
         let newMarketingStarBonus = player.marketingStarBonus;
         let newRecurringRevenue = player.recurringRevenue;
+        let newBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
 
         // Determine the last action for "night-owl" trait bonus
         const lastActionIndex = player.plannedActions.length - 1;
@@ -2077,7 +2173,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               totalPower += 2;
             }
             if (useAi) {
-              newResources.techDebt += 1; // Extra debt from volatile AI usage
+              newBuffer.tokens.push(randomTokenColor()); // Extra debt token from volatile AI usage
             }
           }
 
@@ -2151,7 +2247,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
             if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
               aiDebt = 0;
             }
-            newResources.techDebt += aiDebt;
+            // Route AI debt through buffer as colored tokens
+            for (let d = 0; d < aiDebt; d++) {
+              newBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full: cascade adds to techDebt integer
+            while (newBuffer.tokens.length >= newBuffer.maxSize) {
+              newBuffer.tokens.splice(0, newBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
+            }
           }
 
           // ============================================
@@ -2219,14 +2323,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
               if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
                 debtReduction += 1;
               }
-              newResources.techDebt = Math.max(
-                0,
-                newResources.techDebt - debtReduction
-              );
-              // Grid redesign: also remove tokens from tech debt buffer
-              const tokensToRemove = 2;
-              const removeCount = Math.min(tokensToRemove, player.techDebtBuffer.tokens.length);
-              player.techDebtBuffer.tokens.splice(0, removeCount);
+              // Clear from buffer first, then from techDebt integer
+              for (let r = 0; r < debtReduction; r++) {
+                if (newBuffer.tokens.length > 0) {
+                  newBuffer.tokens.pop();
+                } else {
+                  newResources.techDebt = Math.max(0, newResources.techDebt - 1);
+                }
+              }
               break;
             }
 
@@ -2587,6 +2691,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ipoBonusScore,
           marketingStarBonus: newMarketingStarBonus,
           recurringRevenue: newRecurringRevenue,
+          techDebtBuffer: newBuffer,
           engineers: player.engineers.map((e) => ({
             ...e,
             assignedAction: undefined,
@@ -2662,6 +2767,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         let newResources = { ...player.resources };
         let newMetrics = { ...player.metrics };
+        const newBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
 
         // Apply resource changes
         if (effect.resourceChanges) {
@@ -2671,6 +2777,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
             techDebtChange = 0; // Block positive (damaging) debt changes
           }
 
+          // Route positive debt through buffer; negative debt reduces techDebt directly
+          if (techDebtChange > 0) {
+            for (let d = 0; d < techDebtChange; d++) {
+              newBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full
+            while (newBuffer.tokens.length >= newBuffer.maxSize) {
+              newBuffer.tokens.splice(0, newBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
+            }
+          } else if (techDebtChange < 0) {
+            newResources.techDebt = Math.max(0, newResources.techDebt + techDebtChange);
+          }
+
           newResources = {
             money: newResources.money + (effect.resourceChanges.money || 0),
             serverCapacity:
@@ -2678,7 +2798,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               (effect.resourceChanges.serverCapacity || 0),
             aiCapacity:
               newResources.aiCapacity + (effect.resourceChanges.aiCapacity || 0),
-            techDebt: Math.max(0, newResources.techDebt + techDebtChange),
+            techDebt: newResources.techDebt,
           };
         }
 
@@ -2715,6 +2835,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ...player,
           resources: newResources,
           metrics: newMetrics,
+          techDebtBuffer: newBuffer,
         };
       }),
       phase: 'round-end' as GamePhase,
@@ -2926,7 +3047,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (occupied.includes(playerId)) return true;
 
     // Dual-focus allows claiming an extra slot on exclusive actions
-    const effectiveMax = hasDualFocus ? (actionSpace.maxWorkers + 1) : actionSpace.maxWorkers;
+    // Cap to player count since slots track unique players
+    const baseMax = Math.min(actionSpace.maxWorkers, state.players.length);
+    const effectiveMax = hasDualFocus ? (baseMax + 1) : baseMax;
 
     // Otherwise check if there's room
     return occupied.length < effectiveMax;
@@ -2937,9 +3060,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const actionSpace = getActionSpace(action);
     const occupied = state.roundState.occupiedActions.get(action) || [];
 
+    // Cap maxWorkers to player count (slots represent unique players, not engineers)
+    const effectiveMax = actionSpace.maxWorkers !== undefined
+      ? Math.min(actionSpace.maxWorkers, state.players.length)
+      : undefined;
+
     return {
       current: occupied.length,
-      max: actionSpace.maxWorkers,
+      max: effectiveMax,
       players: occupied,
     };
   },
@@ -3027,32 +3155,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
             // Token allowance rules:
             // Base (no specialty match): 1 token of any color
-            // Specialty match: 2 tokens of specialty color
+            // Specialty match: CHOICE → 1 any-color OR 2 specialty-color
             // AI (no specialty match): 2 tokens of any color
-            // AI + specialty match: 3 tokens of specialty color
-            let maxPicks: number;
-            let pickColor: typeof specialtyColor;
-            if (hasSpecialtyMatch && useAi) {
-              maxPicks = 3;
-              pickColor = specialtyColor;
-            } else if (hasSpecialtyMatch) {
-              maxPicks = 2;
-              pickColor = specialtyColor;
-            } else if (useAi) {
-              maxPicks = 2;
-              pickColor = undefined; // any color
+            // AI + specialty match: CHOICE → 2 any-color OR 3 specialty-color
+            if (hasSpecialtyMatch) {
+              // Player must choose: generic (fewer, any color) vs specialty (more, locked color)
+              const genericPicks = useAi ? 2 : 1;
+              const specialtyPicks = useAi ? 3 : 2;
+              tokenPickState = {
+                maxPicks: 0,          // will be set after choice
+                picksRemaining: 0,
+                specialtyColor: undefined,
+                useAi,
+                engineerId,
+                awaitingSpecialtyChoice: true,
+                specialtyOption: { maxPicks: specialtyPicks, color: specialtyColor! },
+                genericOption: { maxPicks: genericPicks },
+              };
             } else {
-              maxPicks = 1;
-              pickColor = undefined; // any color
+              const maxPicks = useAi ? 2 : 1;
+              tokenPickState = {
+                maxPicks,
+                picksRemaining: maxPicks,
+                specialtyColor: undefined, // any color
+                useAi,
+                engineerId,
+              };
             }
-
-            tokenPickState = {
-              maxPicks,
-              picksRemaining: maxPicks,
-              specialtyColor: pickColor,
-              useAi,
-              engineerId,
-            };
           }
 
           return {
@@ -3179,18 +3308,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
             if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
               aiDebt = 0;
             }
-            // Volatile trait: AI usage adds +1 extra debt
+            // Volatile trait: AI usage adds +1 extra debt token
             if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile' && effectiveUseAi) {
-              newResources.techDebt += 1;
+              newTechDebtBuffer.tokens.push(randomTokenColor());
             }
-            newResources.techDebt += aiDebt;
-
-            // Fill tech debt buffer with random tokens from AI usage
-            if (aiDebt > 0) {
-              for (let i = 0; i < aiDebt && newTechDebtBuffer.tokens.length < newTechDebtBuffer.maxSize; i++) {
-                const randomColor = TOKEN_COLORS[Math.floor(Math.random() * TOKEN_COLORS.length)];
-                newTechDebtBuffer.tokens.push(randomColor);
-              }
+            // Route AI debt through buffer as colored tokens
+            for (let d = 0; d < aiDebt; d++) {
+              newTechDebtBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full: cascade adds to techDebt integer
+            while (newTechDebtBuffer.tokens.length >= newTechDebtBuffer.maxSize) {
+              newTechDebtBuffer.tokens.splice(0, newTechDebtBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
             }
           }
 
@@ -3212,7 +3341,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
               if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
                 debtReduction += 1;
               }
-              newResources.techDebt = Math.max(0, newResources.techDebt - debtReduction);
+              // Clear from buffer first, then from techDebt integer
+              for (let r = 0; r < debtReduction; r++) {
+                if (newTechDebtBuffer.tokens.length > 0) {
+                  newTechDebtBuffer.tokens.pop();
+                } else {
+                  newResources.techDebt = Math.max(0, newResources.techDebt - 1);
+                }
+              }
               break;
             }
 
@@ -3578,11 +3714,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
 
       // All engineers placed — this round of the action draft is complete.
-      // Check if this is the last round of the quarter.
+      // Check if this is the last round of the quarter OR if code pool is depleted.
       const roundInQuarter = ((state.currentRound - 1) % ROUNDS_PER_QUARTER) + 1;
       const isLastRoundOfQuarter = roundInQuarter >= ROUNDS_PER_QUARTER;
+      const isCodePoolEmpty = state.roundState.codePool.length === 0;
 
-      if (isLastRoundOfQuarter) {
+      if (isLastRoundOfQuarter || isCodePoolEmpty) {
         // End of quarter: go to event phase for quarterly cleanup
         return {
           phase: 'event' as GamePhase,
@@ -3636,9 +3773,49 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       };
     });
+    // Auto-advance to next player after interactive action resolves
+    get().endTurn();
+  },
+
+  resolveSpecialtyChoice: (_playerId: string, useSpecialty: boolean) => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game') return state;
+      const pickState = turnState.tokenPickState;
+      if (!pickState?.awaitingSpecialtyChoice) return state;
+
+      let maxPicks: number;
+      let specialtyColor: typeof pickState.specialtyColor;
+      if (useSpecialty && pickState.specialtyOption) {
+        maxPicks = pickState.specialtyOption.maxPicks;
+        specialtyColor = pickState.specialtyOption.color;
+      } else {
+        maxPicks = pickState.genericOption?.maxPicks ?? 1;
+        specialtyColor = undefined;
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          turnState: {
+            ...turnState,
+            tokenPickState: {
+              ...pickState,
+              maxPicks,
+              picksRemaining: maxPicks,
+              specialtyColor,
+              awaitingSpecialtyChoice: false,
+              specialtyOption: undefined,
+              genericOption: undefined,
+            },
+          },
+        },
+      };
+    });
   },
 
   placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => {
+    let finished = false;
     set((state) => {
       const turnState = state.roundState.turnState;
       if (!turnState || turnState.phase !== 'mini-game' || turnState.pendingAction !== 'develop-features') {
@@ -3685,6 +3862,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const isDone = newPicksRemaining <= 0 || newPool.length === 0;
 
       if (isDone) {
+        finished = true;
         // All picks used or pool empty — return to free-actions
         return {
           players: updatedPlayers,
@@ -3717,6 +3895,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
     });
+    // Auto-advance to next player after all tokens placed
+    if (finished) {
+      get().endTurn();
+    }
   },
 
   // ============================================

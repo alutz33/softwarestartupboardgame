@@ -472,6 +472,7 @@ export interface Player {
   aiResearchLevel: AIResearchLevel;
   publishedApps: PublishedApp[];
   heldAppCards: AppCard[];
+  dealtAppCards?: AppCard[];            // Temporary: cards dealt at funding selection, awaiting player choice
   corporationStyle?: CorporationStyle;
   commitCodeUsedThisRound: boolean;
   // Action Draft redesign fields
@@ -868,6 +869,11 @@ export function createEmptyBuffer(): TechDebtBuffer {
   return { tokens: [], maxSize: TECH_DEBT_BUFFER_SIZE };
 }
 
+// Helper: get a random token color
+export function randomTokenColor(): TokenColor {
+  return TOKEN_COLORS[Math.floor(Math.random() * TOKEN_COLORS.length)];
+}
+
 // AI research level (0-2)
 export type AIResearchLevel = 0 | 1 | 2;
 
@@ -884,6 +890,9 @@ export interface TokenPickState {
   specialtyColor?: TokenColor; // if set, specialty-matching tokens only (or any color if undefined)
   useAi: boolean;             // whether AI augmentation is active (affects tech debt)
   engineerId: string;         // the engineer performing this action
+  awaitingSpecialtyChoice?: boolean; // true when player must choose specialty vs generic picks
+  specialtyOption?: { maxPicks: number; color: TokenColor }; // the specialty-color option
+  genericOption?: { maxPicks: number };                      // the any-color option
 }
 
 export interface TurnState {

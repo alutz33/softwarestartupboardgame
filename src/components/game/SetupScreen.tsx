@@ -100,7 +100,7 @@ export function SetupScreen() {
         </Button>
 
         <div className="mt-8 text-center text-gray-500 text-sm">
-          <p>2-4 players | 4 rounds | ~30 minutes</p>
+          <p>2-4 players | 4 quarters | ~30 minutes</p>
         </div>
       </motion.div>
     </div>

@@ -86,7 +86,6 @@ export function ActionDraftPhase() {
   const canAffordAction = useGameStore((s) => s.canAffordAction);
   const isActionAvailable = useGameStore((s) => s.isActionAvailable);
   const getActionOccupancy = useGameStore((s) => s.getActionOccupancy);
-  const endTurn = useGameStore((s) => s.endTurn);
   const claimAppCard = useGameStore((s) => s.claimAppCard);
   const startActionDraft = useGameStore((s) => s.startActionDraft);
   const placeTokenOnGrid = useGameStore((s) => s.placeTokenOnGrid);
@@ -94,6 +93,7 @@ export function ActionDraftPhase() {
   const completeInteractiveAction = useGameStore((s) => s.completeInteractiveAction);
   const publishApp = useGameStore((s) => s.publishApp);
   const commitCode = useGameStore((s) => s.commitCode);
+  const resolveSpecialtyChoice = useGameStore((s) => s.resolveSpecialtyChoice);
 
   // Initialize turn state when entering the action-draft phase
   useEffect(() => {
@@ -116,6 +116,9 @@ export function ActionDraftPhase() {
 
   // Optimize-code mini-game state
   const [optimizeGame, setOptimizeGame] = useState<OptimizeMiniGameState | null>(null);
+
+  // Drag-and-drop state
+  const [dragOverAction, setDragOverAction] = useState<ActionType | null>(null);
 
   // Derive current player from turnState
   const turnState = roundState.turnState;
@@ -201,12 +204,6 @@ export function ActionDraftPhase() {
       setPendingClaim(null);
       setShowAiModal(false);
     }
-  };
-
-  const handleEndTurn = () => {
-    setSelectedEngineerId(null);
-    setFreeActionMode(null);
-    endTurn();
   };
 
   // ---- Free Action Handlers ----
@@ -410,6 +407,47 @@ export function ActionDraftPhase() {
     completeInteractiveAction();
   }, [completeInteractiveAction]);
 
+  // ---- Drag-and-Drop Handlers ----
+
+  const handleDragStart = (_e: React.DragEvent, engineerId: string) => {
+    setSelectedEngineerId(engineerId);
+  };
+
+  const handleActionDragOver = (e: React.DragEvent, actionType: ActionType) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverAction(actionType);
+  };
+
+  const handleActionDragLeave = () => {
+    setDragOverAction(null);
+  };
+
+  const handleActionDrop = (e: React.DragEvent, actionType: ActionType) => {
+    e.preventDefault();
+    setDragOverAction(null);
+    const engineerId = e.dataTransfer.getData('text/plain');
+    if (!engineerId) return;
+
+    const eng = currentPlayer.engineers.find(en => en.id === engineerId);
+    if (!eng || eng.assignedAction) return;
+
+    // Check debt blocking
+    const debtLevel = getTechDebtLevel(currentPlayer.resources.techDebt);
+    if (debtLevel.blocksDevelopment && (actionType === 'develop-features' || actionType === 'optimize-code')) return;
+    if (!canAffordAction(currentPlayer.id, actionType)) return;
+    if (!isActionAvailable(currentPlayer.id, actionType)) return;
+
+    // If player has AI capacity, show the modal
+    if (currentPlayer.resources.aiCapacity > 0) {
+      setPendingClaim({ engineerId, actionType });
+      setShowAiModal(true);
+    } else {
+      claimActionSlot(currentPlayer.id, engineerId, actionType, false);
+      setSelectedEngineerId(null);
+    }
+  };
+
   // Get engineers assigned to a specific action (for displaying on action cards)
   const getAssignedEngineers = (actionType: ActionType) => {
     return currentPlayer.engineers.filter((e) => e.assignedAction === actionType);
@@ -512,6 +550,19 @@ export function ActionDraftPhase() {
           {/* Current turn indicator */}
           <div className="flex items-center gap-2">
             <span className="text-gray-400 text-sm">Current Turn:</span>
+            {currentPlayer.leader ? (
+              <img
+                src={`/personas/${currentPlayer.leader.id}.png`}
+                alt={currentPlayer.leader.name}
+                className="w-8 h-10 rounded object-cover border-2"
+                style={{ borderColor: currentPlayer.color }}
+              />
+            ) : (
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: currentPlayer.color }}
+              />
+            )}
             <span
               className="font-bold text-lg"
               style={{ color: currentPlayer.color }}
@@ -531,14 +582,23 @@ export function ActionDraftPhase() {
             {players.map((p) => (
               <div
                 key={p.id}
-                className={`flex items-center gap-1 px-2 py-1 rounded ${
+                className={`flex items-center gap-1.5 px-2 py-1 rounded ${
                   p.id === currentPlayer.id ? 'bg-gray-700' : ''
                 }`}
               >
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: p.color }}
-                />
+                {p.leader ? (
+                  <img
+                    src={`/personas/${p.leader.id}.png`}
+                    alt={p.leader.name}
+                    className="w-5 h-6 rounded-sm object-cover border"
+                    style={{ borderColor: p.color }}
+                  />
+                ) : (
+                  <div
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: p.color }}
+                  />
+                )}
                 <span className="text-sm text-gray-300">{p.name}</span>
                 <span className="text-sm font-bold text-yellow-400">
                   {getPlayerVP(p)} VP
@@ -677,112 +737,29 @@ export function ActionDraftPhase() {
       <div className="flex-1 overflow-hidden">
         <div className="max-w-[1800px] mx-auto h-full grid grid-cols-12 gap-3 p-3">
 
-          {/* ===== LEFT PANEL: My Board ===== */}
-          <div className="col-span-12 lg:col-span-3 space-y-3 overflow-y-auto max-h-[calc(100vh-8rem)]">
-            {/* Section header */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-                My Board
-              </h2>
-              <span className="text-xs text-gray-500">{currentPlayer.name}</span>
-            </div>
-
-            {/* Code Grid */}
-            <div className={`bg-gray-800/50 rounded-lg p-3 border ${
-              getGridClickHandler() ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
-            }`}>
-              <div className="text-xs text-gray-400 mb-2">
-                Code Grid
-                {getGridClickHandler() && (
-                  <span className="ml-2 text-indigo-400 font-medium">(click a cell)</span>
-                )}
-              </div>
-              <CodeGridView
-                grid={currentPlayer.codeGrid}
-                onCellClick={getGridClickHandler()}
-              />
-            </div>
-
-            {/* Tech Debt Buffer */}
-            <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
-              <div className="text-xs text-gray-400 mb-2">Tech Debt Buffer</div>
-              <TechDebtBufferView buffer={currentPlayer.techDebtBuffer} />
-            </div>
-
-            {/* AI Research Level */}
-            <div className="bg-gray-800/50 rounded-lg px-3 py-2 border border-gray-700 flex items-center justify-between">
-              <span className="text-xs text-gray-400">AI Level</span>
-              <span className="text-sm font-bold text-purple-400">
-                {currentPlayer.aiResearchLevel}/2
-              </span>
-            </div>
-
-            {/* Held App Cards */}
-            <div className={`bg-gray-800/50 rounded-lg p-3 border ${
-              freeActionMode?.type === 'publish-select-card' ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
-            }`}>
-              <div className="text-xs text-gray-400 mb-2">
-                Held App Cards ({currentPlayer.heldAppCards.length}/3)
-                {freeActionMode?.type === 'publish-select-card' && (
-                  <span className="ml-2 text-indigo-400 font-medium">(click to select)</span>
-                )}
-              </div>
-              {currentPlayer.heldAppCards.length === 0 ? (
-                <p className="text-gray-600 text-xs">No app cards yet</p>
-              ) : (
-                <div className="space-y-2">
-                  {currentPlayer.heldAppCards.map((card) => (
-                    <AppCardView
-                      key={card.id}
-                      card={card}
-                      compact={freeActionMode?.type !== 'publish-select-card'}
-                      isSelected={
-                        freeActionMode?.type === 'publish-place' && freeActionMode.card.id === card.id
-                      }
-                      onClick={
-                        freeActionMode?.type === 'publish-select-card'
-                          ? () => handlePublishSelectCard(card)
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Published Apps */}
-            {currentPlayer.publishedApps.length > 0 && (
-              <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
-                <div className="text-xs text-gray-400 mb-2">
-                  Published Apps ({currentPlayer.publishedApps.length})
-                </div>
-                <div className="space-y-1">
-                  {currentPlayer.publishedApps.map((app) => (
-                    <div key={app.cardId} className="flex items-center justify-between text-xs">
-                      <span className="text-white">{app.name}</span>
-                      <span className="text-yellow-400">
-                        {'★'.repeat(app.stars)}{'☆'.repeat(5 - app.stars)} {app.vpEarned} VP
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
+          {/* ===== LEFT PANEL: Player Info ===== */}
+          <div className="col-span-12 lg:col-span-2 space-y-2 overflow-y-auto max-h-[calc(100vh-16rem)]">
             {/* Leader Card */}
             {currentPlayer.leader && (
-              <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
-                <div className="text-xs text-gray-400 mb-1">Leader</div>
-                <div className="text-sm font-bold text-white">
-                  {currentPlayer.leader.name}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {currentPlayer.leader.leaderSide.passive.description}
+              <div className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700">
+                <div className="flex items-center gap-2 mb-1">
+                  <img
+                    src={`/personas/${currentPlayer.leader.id}.png`}
+                    alt={currentPlayer.leader.name}
+                    className="w-6 h-8 rounded object-cover border"
+                    style={{ borderColor: currentPlayer.color }}
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-white">{currentPlayer.leader.name}</div>
+                    <div className="text-[10px] text-gray-400 leading-tight">
+                      {currentPlayer.leader.leaderSide.passive.description}
+                    </div>
+                  </div>
                 </div>
                 {currentPlayer.leader.leaderSide.power && (
                   <button
                     onClick={handleLeaderPowerClick}
-                    className={`mt-2 w-full text-xs px-2 py-1 rounded font-medium transition-colors ${
+                    className={`w-full text-[10px] px-2 py-1 rounded font-medium transition-colors ${
                       currentPlayer.leaderPowerUsed
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                         : 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer'
@@ -795,26 +772,67 @@ export function ActionDraftPhase() {
               </div>
             )}
 
-            {/* Corporation Style */}
-            {currentPlayer.corporationStyle && (
-              <div className="bg-gray-800/50 rounded-lg px-3 py-2 border border-gray-700 flex items-center justify-between">
-                <span className="text-xs text-gray-400">Corp Style</span>
+            {/* Quick Stats */}
+            <div className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">Money</span>
+                <span className="font-bold text-green-400">${currentPlayer.resources.money}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">MAU</span>
+                <span className="font-bold text-blue-400">{currentPlayer.metrics.mau.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">Rating</span>
+                <span className="font-bold text-yellow-400">{currentPlayer.metrics.rating}/10</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">AI Level</span>
+                <span className="font-bold text-purple-400">{currentPlayer.aiResearchLevel}/2</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">Corp</span>
                 <Badge variant={currentPlayer.corporationStyle === 'agency' ? 'info' : 'success'} size="sm">
                   {currentPlayer.corporationStyle === 'agency' ? 'Agency' : 'Product'}
                 </Badge>
               </div>
+            </div>
+
+            {/* Tech Debt Buffer */}
+            <div className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700">
+              <div className="text-[10px] text-gray-400 mb-1">Tech Debt</div>
+              <TechDebtBufferView buffer={currentPlayer.techDebtBuffer} />
+            </div>
+
+            {/* Published Apps */}
+            {currentPlayer.publishedApps.length > 0 && (
+              <div className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700">
+                <div className="text-[10px] text-gray-400 mb-1">
+                  Published ({currentPlayer.publishedApps.length})
+                </div>
+                <div className="space-y-0.5">
+                  {currentPlayer.publishedApps.map((app) => (
+                    <div key={app.cardId} className="flex items-center justify-between text-[10px]">
+                      <span className="text-white truncate">{app.name}</span>
+                      <span className="text-yellow-400 shrink-0">
+                        {'★'.repeat(app.stars)} {app.vpEarned}VP
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* ===== CENTER PANEL: Action Spaces + Shared Resources ===== */}
-          <div className="col-span-12 lg:col-span-6 space-y-3 overflow-y-auto max-h-[calc(100vh-8rem)]">
+          {/* ===== CENTER PANEL: Code Grid + Pool + App Cards ===== */}
+          <div className="col-span-12 lg:col-span-7 space-y-3 overflow-y-auto max-h-[calc(100vh-16rem)]">
             {/* Tech debt warning banner */}
             {(() => {
               const debtLevel = getTechDebtLevel(currentPlayer.resources.techDebt);
               if (debtLevel.powerPenalty < 0) {
                 return (
                   <div
-                    className={`p-3 rounded-lg border ${
+                    className={`p-2 rounded-lg border ${
                       debtLevel.blocksDevelopment
                         ? 'bg-red-900/40 border-red-500'
                         : 'bg-orange-900/30 border-orange-500/50'
@@ -822,22 +840,12 @@ export function ActionDraftPhase() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <span
-                          className={`text-sm font-bold ${
-                            debtLevel.blocksDevelopment ? 'text-red-400' : 'text-orange-400'
-                          }`}
-                        >
-                          {debtLevel.blocksDevelopment
-                            ? 'CRITICAL: Tech Debt Crisis!'
-                            : 'Tech Debt Warning'}
+                        <span className={`text-xs font-bold ${debtLevel.blocksDevelopment ? 'text-red-400' : 'text-orange-400'}`}>
+                          {debtLevel.blocksDevelopment ? 'CRITICAL: Tech Debt Crisis!' : 'Tech Debt Warning'}
                         </span>
-                        <span className="text-xs text-gray-300 ml-2">
-                          All engineers {debtLevel.powerPenalty} power
-                        </span>
+                        <span className="text-xs text-gray-300 ml-2">All engineers {debtLevel.powerPenalty} power</span>
                       </div>
-                      <span className="text-sm font-bold text-white">
-                        {currentPlayer.resources.techDebt} debt
-                      </span>
+                      <span className="text-xs font-bold text-white">{currentPlayer.resources.techDebt} debt</span>
                     </div>
                   </div>
                 );
@@ -845,133 +853,135 @@ export function ActionDraftPhase() {
               return null;
             })()}
 
-            {/* Section: Action Spaces */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Action Spaces
-                </h2>
-                {selectedEngineerId && (
-                  <motion.span
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-xs text-blue-400"
-                  >
-                    Click an action to place engineer
-                  </motion.span>
+            {/* Code Grid — CENTER ATTRACTION */}
+            <div className={`bg-gray-800/50 rounded-lg p-4 border ${
+              getGridClickHandler() ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-white uppercase tracking-wider">
+                  Code Grid
+                  {getGridClickHandler() && (
+                    <span className="ml-2 text-indigo-400 font-medium text-xs normal-case">(click a cell)</span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-500">{currentPlayer.name}</span>
+              </div>
+              <div className="flex justify-center">
+                <CodeGridView
+                  grid={currentPlayer.codeGrid}
+                  onCellClick={getGridClickHandler()}
+                  size="lg"
+                />
+              </div>
+            </div>
+
+            {/* Shared Code Pool */}
+            <CodePoolView pool={roundState.codePool} />
+
+            {/* Held App Cards (Agency only) */}
+            {currentPlayer.corporationStyle === 'agency' && (
+              <div className={`bg-gray-800/50 rounded-lg p-3 border ${
+                freeActionMode?.type === 'publish-select-card' ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-gray-700'
+              }`}>
+                <div className="text-xs text-gray-400 mb-2">
+                  Held App Cards ({currentPlayer.heldAppCards.length}/3)
+                  {freeActionMode?.type === 'publish-select-card' && (
+                    <span className="ml-2 text-indigo-400 font-medium">(click to select)</span>
+                  )}
+                </div>
+                {currentPlayer.heldAppCards.length === 0 ? (
+                  <p className="text-gray-600 text-xs">No app cards yet</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {currentPlayer.heldAppCards.map((card) => (
+                      <AppCardView
+                        key={card.id}
+                        card={card}
+                        compact={false}
+                        isSelected={
+                          freeActionMode?.type === 'publish-place' && freeActionMode.card.id === card.id
+                        }
+                        onClick={
+                          freeActionMode?.type === 'publish-select-card'
+                            ? () => handlePublishSelectCard(card)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
+            )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {availableActions.map((action) => {
-                  const slotInfo = getActionOccupancy(action.id);
-                  const isAvailable = isActionAvailable(currentPlayer.id, action.id);
-                  const debtLevel = getTechDebtLevel(currentPlayer.resources.techDebt);
-                  const isBlockedByDebt =
-                    debtLevel.blocksDevelopment &&
-                    (action.id === 'develop-features' || action.id === 'optimize-code');
-
-                  // Map occupying player IDs to their colors for the slot indicator
-                  const occupyingColors = slotInfo.players.map((pid) => {
-                    const p = players.find((pl) => pl.id === pid);
-                    return p?.color ?? '#666';
-                  });
-
-                  return (
-                    <ActionSpaceCard
-                      key={action.id}
-                      action={action}
-                      assignedEngineers={getAssignedEngineers(action.id)}
-                      isSelected={false}
-                      onClick={() => handleActionClick(action.id)}
-                      canAfford={canAffordAction(currentPlayer.id, action.id)}
-                      slotInfo={slotInfo}
-                      isAvailable={isAvailable}
-                      isBlockedByDebt={isBlockedByDebt}
-                      allPlayerEngineers={buildAllPlayerEngineers(action.id)}
-                      playerColors={occupyingColors}
-                    />
-                  );
-                })}
+            {/* App Market (Agency only) */}
+            {currentPlayer.corporationStyle === 'agency' && (
+              <div>
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-2">
+                  App Market
+                </h2>
+                {roundState.appMarket.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No app cards available</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {roundState.appMarket.map((card) => (
+                      <AppCardView
+                        key={card.id}
+                        card={card}
+                        onClick={
+                          isMyTurn && currentPlayer.heldAppCards.length < 3
+                            ? () => claimAppCard(currentPlayer.id, card.id)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-
-            {/* Section: Shared Code Pool */}
-            <div>
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-2">
-                Shared Code Pool
-              </h2>
-              <CodePoolView pool={roundState.codePool} />
-            </div>
-
-            {/* Section: App Market */}
-            <div>
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-2">
-                App Market
-              </h2>
-              {roundState.appMarket.length === 0 ? (
-                <p className="text-gray-500 text-sm">No app cards available</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {roundState.appMarket.map((card) => (
-                    <AppCardView
-                      key={card.id}
-                      card={card}
-                      onClick={
-                        isMyTurn && currentPlayer.heldAppCards.length < 3
-                          ? () => claimAppCard(currentPlayer.id, card.id)
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
 
           {/* ===== RIGHT PANEL: Opponent Boards ===== */}
-          <div className="col-span-12 lg:col-span-3 space-y-3 overflow-y-auto max-h-[calc(100vh-8rem)]">
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+          <div className="col-span-12 lg:col-span-3 space-y-2 overflow-y-auto max-h-[calc(100vh-16rem)]">
+            <h2 className="text-xs font-bold text-white uppercase tracking-wider">
               Opponents
             </h2>
 
             {opponents.map((opp) => (
               <div
                 key={opp.id}
-                className="bg-gray-800/50 rounded-lg p-3 border border-gray-700"
+                className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700"
               >
-                {/* Opponent header */}
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: opp.color }}
-                    />
-                    <span className="text-sm font-semibold text-white">{opp.name}</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    {opp.leader ? (
+                      <img
+                        src={`/personas/${opp.leader.id}.png`}
+                        alt={opp.leader.name}
+                        className="w-5 h-6 rounded-sm object-cover border"
+                        style={{ borderColor: opp.color }}
+                      />
+                    ) : (
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: opp.color }}
+                      />
+                    )}
+                    <span className="text-xs font-semibold text-white">{opp.name}</span>
                   </div>
-                  <span className="text-xs font-bold text-yellow-400">
+                  <span className="text-[10px] font-bold text-yellow-400">
                     {getPlayerVP(opp)} VP
                   </span>
                 </div>
 
-                {/* Compact grid */}
-                <div className="mb-2">
-                  <CodeGridView grid={opp.codeGrid} compact />
+                <div className="mb-1.5">
+                  <CodeGridView grid={opp.codeGrid} size="sm" />
                 </div>
 
-                {/* Stats row */}
-                <div className="flex gap-2 text-xs text-gray-400">
+                <div className="flex gap-2 text-[10px] text-gray-400">
                   <span>Apps: {opp.publishedApps.length}</span>
                   <span>${opp.resources.money}</span>
                   <span>Eng: {opp.engineers.length}</span>
-                  <Tooltip
-                    content={`Tech Debt: ${opp.resources.techDebt}`}
-                    position="left"
-                  >
-                    <span className="border-b border-dotted border-gray-600 cursor-help">
-                      Debt: {opp.resources.techDebt}
-                    </span>
-                  </Tooltip>
+                  <span>Debt: {opp.resources.techDebt}</span>
                 </div>
               </div>
             ))}
@@ -979,140 +989,160 @@ export function ActionDraftPhase() {
         </div>
       </div>
 
-      {/* ===== BOTTOM BAR ===== */}
-      <footer className="bg-gray-800 border-t border-gray-700 px-4 py-3">
-        <div className="max-w-[1800px] mx-auto flex items-center justify-between gap-4">
-          {/* Left: Engineers */}
-          <div className="flex items-center gap-2 flex-1 overflow-x-auto">
-            <span className="text-xs text-gray-400 whitespace-nowrap mr-1">
-              Engineers:
-            </span>
-            {currentPlayer.engineers.map((eng) => (
-              <EngineerToken
-                key={eng.id}
-                engineer={eng}
-                isAssigned={!!eng.assignedAction}
-                isSelected={selectedEngineerId === eng.id}
-                onClick={() => handleEngineerClick(eng.id)}
-                techDebt={currentPlayer.resources.techDebt}
-              />
-            ))}
-            {currentPlayer.engineers.length === 0 && (
-              <span className="text-xs text-gray-600">No engineers</span>
+      {/* ===== BOTTOM SECTION: Action Tiles + Engineer Tray ===== */}
+      <div className="bg-gray-800/90 border-t border-gray-700">
+        {/* Action Tiles Strip */}
+        <div className="max-w-[1800px] mx-auto px-4 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 uppercase font-bold shrink-0 mr-1">Actions</span>
+            {selectedEngineerId && (
+              <motion.span
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="text-[10px] text-blue-400 shrink-0"
+              >
+                Click or drop on an action
+              </motion.span>
             )}
+            <div className="flex gap-1.5 flex-1 overflow-x-auto">
+              {availableActions.map((action) => {
+                const slotInfo = getActionOccupancy(action.id);
+                const isAvailable = isActionAvailable(currentPlayer.id, action.id);
+                const debtLevel = getTechDebtLevel(currentPlayer.resources.techDebt);
+                const isBlockedByDebt =
+                  debtLevel.blocksDevelopment &&
+                  (action.id === 'develop-features' || action.id === 'optimize-code');
+                const occupyingColors = slotInfo.players.map((pid) => {
+                  const p = players.find((pl) => pl.id === pid);
+                  return p?.color ?? '#666';
+                });
+
+                return (
+                  <ActionSpaceCard
+                    key={action.id}
+                    action={action}
+                    assignedEngineers={getAssignedEngineers(action.id)}
+                    isSelected={false}
+                    onClick={() => handleActionClick(action.id)}
+                    canAfford={canAffordAction(currentPlayer.id, action.id)}
+                    slotInfo={slotInfo}
+                    isAvailable={isAvailable}
+                    isBlockedByDebt={isBlockedByDebt}
+                    allPlayerEngineers={buildAllPlayerEngineers(action.id)}
+                    playerColors={occupyingColors}
+                    compact
+                    onDragOver={(e) => handleActionDragOver(e, action.id)}
+                    onDrop={(e) => handleActionDrop(e, action.id)}
+                    isDragOver={dragOverAction === action.id}
+                  />
+                );
+              })}
+            </div>
           </div>
+        </div>
 
-          {/* Center: Resources */}
-          <div className="flex items-center gap-4 shrink-0">
-            <div className="text-center">
-              <div className="text-xs text-gray-400">Money</div>
-              <div className="text-lg font-bold text-green-400">
-                ${currentPlayer.resources.money}
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-gray-400">MAU</div>
-              <div className="text-lg font-bold text-blue-400">
-                {currentPlayer.metrics.mau.toLocaleString()}
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-gray-400">Rating</div>
-              <div className="text-lg font-bold text-yellow-400">
-                {currentPlayer.metrics.rating}/10
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Free actions + End Turn */}
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Publish App — agency only */}
-            <Tooltip
-              content={
-                currentPlayer.corporationStyle !== 'agency'
-                  ? 'Agency corporations only'
-                  : currentPlayer.heldAppCards.length === 0
-                    ? 'No held app cards'
-                    : 'Publish an app from your held cards'
-              }
-              position="top"
+        {/* Engineer Tray + Free Actions */}
+        <div className="border-t border-gray-700/50">
+          <div className="max-w-[1800px] mx-auto px-4 py-2 flex items-center justify-between gap-4">
+            {/* Left: Engineers (draggable) */}
+            <div
+              className="flex items-center gap-2 flex-1 overflow-x-auto"
+              onDragLeave={handleActionDragLeave}
             >
-              <button
-                onClick={handlePublishAppClick}
-                className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  freeActionMode?.type === 'publish-select-card' || freeActionMode?.type === 'publish-place'
-                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                }`}
-                disabled={!canPublish}
-              >
-                Publish App
-              </button>
-            </Tooltip>
+              <span className="text-[10px] text-gray-500 uppercase font-bold whitespace-nowrap mr-1">
+                Engineers
+              </span>
+              {currentPlayer.engineers.map((eng) => (
+                <EngineerToken
+                  key={eng.id}
+                  engineer={eng}
+                  isAssigned={!!eng.assignedAction}
+                  isSelected={selectedEngineerId === eng.id}
+                  onClick={() => handleEngineerClick(eng.id)}
+                  techDebt={currentPlayer.resources.techDebt}
+                  draggable={isMyTurn}
+                  onDragStart={handleDragStart}
+                />
+              ))}
+              {currentPlayer.engineers.length === 0 && (
+                <span className="text-xs text-gray-600">No engineers</span>
+              )}
+            </div>
 
-            {/* Commit Code — both corp types */}
-            <Tooltip
-              content={
-                currentPlayer.commitCodeUsedThisRound
-                  ? 'Already used this round'
-                  : currentPlayer.corporationStyle === 'agency'
-                    ? 'Remove a token from your grid'
-                    : 'Clear a line of matching tokens for $1 + MAU'
-              }
-              position="top"
-            >
-              <button
-                onClick={handleCommitCodeClick}
-                className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  freeActionMode?.type === 'commit-agency' || freeActionMode?.type === 'commit-product-start' || freeActionMode?.type === 'commit-product-direction'
-                    ? 'bg-orange-600 text-white ring-2 ring-orange-400'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                }`}
-                disabled={!canCommit}
-              >
-                Commit Code
-              </button>
-            </Tooltip>
-
-            {/* Leader Power — once per game */}
-            {currentPlayer.leader?.leaderSide.power && (
+            {/* Right: Free actions */}
+            <div className="flex items-center gap-2 shrink-0">
               <Tooltip
                 content={
-                  currentPlayer.leaderPowerUsed
-                    ? 'Already used (once per game)'
-                    : `${currentPlayer.leader.leaderSide.power.name}: ${currentPlayer.leader.leaderSide.power.description}`
+                  currentPlayer.corporationStyle !== 'agency'
+                    ? 'Agency corporations only'
+                    : currentPlayer.heldAppCards.length === 0
+                      ? 'No held app cards'
+                      : 'Publish an app from your held cards'
                 }
                 position="top"
               >
                 <button
-                  onClick={handleLeaderPowerClick}
-                  className={`px-3 py-2 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    currentPlayer.leaderPowerUsed
-                      ? 'bg-gray-700 text-gray-500'
-                      : 'bg-yellow-700 hover:bg-yellow-600 text-yellow-100'
+                  onClick={handlePublishAppClick}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    freeActionMode?.type === 'publish-select-card' || freeActionMode?.type === 'publish-place'
+                      ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
-                  disabled={!canUseLeaderPower}
+                  disabled={!canPublish}
                 >
-                  Leader Power
+                  Publish App
                 </button>
               </Tooltip>
-            )}
 
-            {/* End Turn */}
-            <button
-              onClick={handleEndTurn}
-              disabled={!isMyTurn}
-              className={`px-4 py-2 rounded font-bold text-sm transition-colors ${
-                isMyTurn
-                  ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              End Turn
-            </button>
+              <Tooltip
+                content={
+                  currentPlayer.commitCodeUsedThisRound
+                    ? 'Already used this round'
+                    : currentPlayer.corporationStyle === 'agency'
+                      ? 'Remove a token from your grid'
+                      : 'Clear a line of matching tokens for $1 + MAU'
+                }
+                position="top"
+              >
+                <button
+                  onClick={handleCommitCodeClick}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    freeActionMode?.type === 'commit-agency' || freeActionMode?.type === 'commit-product-start' || freeActionMode?.type === 'commit-product-direction'
+                      ? 'bg-orange-600 text-white ring-2 ring-orange-400'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                  disabled={!canCommit}
+                >
+                  Commit Code
+                </button>
+              </Tooltip>
+
+              {currentPlayer.leader?.leaderSide.power && (
+                <Tooltip
+                  content={
+                    currentPlayer.leaderPowerUsed
+                      ? 'Already used (once per game)'
+                      : `${currentPlayer.leader.leaderSide.power.name}: ${currentPlayer.leader.leaderSide.power.description}`
+                  }
+                  position="top"
+                >
+                  <button
+                    onClick={handleLeaderPowerClick}
+                    className={`px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      currentPlayer.leaderPowerUsed
+                        ? 'bg-gray-700 text-gray-500'
+                        : 'bg-yellow-700 hover:bg-yellow-600 text-yellow-100'
+                    }`}
+                    disabled={!canUseLeaderPower}
+                  >
+                    Leader Power
+                  </button>
+                </Tooltip>
+              )}
+            </div>
           </div>
         </div>
-      </footer>
+      </div>
 
       {/* ===== MODALS ===== */}
       <AiAugmentationModal
@@ -1164,9 +1194,61 @@ export function ActionDraftPhase() {
         )}
       </AnimatePresence>
 
+      {/* ===== SPECIALTY CHOICE MODAL ===== */}
+      <AnimatePresence>
+        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' &&
+         turnState.tokenPickState?.awaitingSpecialtyChoice && (() => {
+          const pickState = turnState.tokenPickState!;
+          const specOpt = pickState.specialtyOption!;
+          const genOpt = pickState.genericOption!;
+          return (
+            <motion.div
+              key="specialty-choice-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-gray-800 rounded-xl border border-gray-600 shadow-2xl p-6 max-w-md w-full mx-4"
+              >
+                <h2 className="text-lg font-bold text-white mb-2">Specialty Match!</h2>
+                <p className="text-sm text-gray-400 mb-4">
+                  Your engineer&apos;s specialty matches this action. Choose your token picking strategy:
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => resolveSpecialtyChoice(currentPlayer.id, false)}
+                    className="w-full px-4 py-3 rounded-lg bg-gray-700 hover:bg-gray-600 border border-gray-500 text-left transition-colors"
+                  >
+                    <div className="text-sm font-bold text-white">
+                      Pick {genOpt.maxPicks} token{genOpt.maxPicks > 1 ? 's' : ''} of any color
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">More flexibility in token choice</div>
+                  </button>
+                  <button
+                    onClick={() => resolveSpecialtyChoice(currentPlayer.id, true)}
+                    className="w-full px-4 py-3 rounded-lg bg-indigo-900/50 hover:bg-indigo-800/50 border border-indigo-500 text-left transition-colors"
+                  >
+                    <div className="text-sm font-bold text-indigo-300">
+                      Pick {specOpt.maxPicks} {specOpt.color} token{specOpt.maxPicks > 1 ? 's' : ''}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">More tokens, but locked to specialty color</div>
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
       {/* ===== DEVELOP FEATURES TOKEN PICKER ===== */}
       <AnimatePresence>
-        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' && (() => {
+        {turnState?.phase === 'mini-game' && turnState?.pendingAction === 'develop-features' &&
+         !turnState.tokenPickState?.awaitingSpecialtyChoice && (() => {
           const pickState = turnState.tokenPickState;
           const picksRemaining = pickState?.picksRemaining ?? 1;
           const maxPicks = pickState?.maxPicks ?? 1;

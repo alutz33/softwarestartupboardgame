@@ -7,6 +7,7 @@ interface CodeGridViewProps {
   onCellClick?: (row: number, col: number) => void;
   highlightCells?: Array<{ row: number; col: number }>;
   compact?: boolean;
+  size?: 'sm' | 'md' | 'lg';
 }
 
 export function CodeGridView({
@@ -14,8 +15,9 @@ export function CodeGridView({
   onCellClick,
   highlightCells = [],
   compact = false,
+  size,
 }: CodeGridViewProps) {
-  const cellSize = compact ? 'w-8 h-8 text-xs' : 'w-12 h-12 text-sm';
+  const cellSize = size === 'lg' ? 'w-16 h-16 text-base' : size === 'sm' || compact ? 'w-8 h-8 text-xs' : 'w-12 h-12 text-sm';
 
   return (
     <div className="inline-block">
