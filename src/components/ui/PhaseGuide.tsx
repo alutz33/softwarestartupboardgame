@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { GamePhase } from '../../types';
 
@@ -31,18 +32,18 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
     ],
   },
   'funding-selection': {
-    title: 'Choose Funding',
-    emoji: 'Choose Funding',
-    description: 'Pick your funding strategy to complement your leader.',
+    title: 'Choose Play Style',
+    emoji: 'Choose Play Style',
+    description: 'Pick how your startup operates: build apps for clients or grow a live product.',
     steps: [
-      '1. Review the three funding types',
-      '2. Consider starting cash vs. special bonuses',
-      '3. Select your funding and confirm',
+      '1. Review both play styles',
+      '2. Consider scoring strategy (apps vs users)',
+      '3. Select your style and confirm',
     ],
     tips: [
-      'VC-Heavy: Most cash but only 40% equity',
-      'Bootstrapped: Least cash but revenue scores 2x',
-      'Angel-Backed: Balanced, extra draft picks',
+      'App Studio: Score VP by publishing pattern-matched apps',
+      'Live Product: Score VP through MAU milestones + committed code',
+      'Both types share the same grid and engineer mechanics!',
     ],
   },
   'startup-draft': {
@@ -93,6 +94,22 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
       'Match specialties to your planned actions',
       'AI specialists are great for Research AI action',
       "If you're behind in MAU, you pick first!",
+    ],
+  },
+  'action-draft': {
+    title: 'Action Draft',
+    emoji: 'Action Draft',
+    description: 'Take turns placing engineers on actions. Effects resolve immediately!',
+    steps: [
+      '1. Free actions: Publish App, Commit Code, or Use Leader Power',
+      '2. Place an engineer on an action space',
+      '3. Resolve the action immediately (pick tokens, swap grid, etc.)',
+      '4. Next player goes (snake order by VP)',
+    ],
+    tips: [
+      'Lowest VP goes first — catch-up mechanic!',
+      'Develop Features lets you pick a token from the pool',
+      'Publish apps to score VP (Agency) or commit code for recurring revenue (Product)',
     ],
   },
   'planning': {
@@ -191,6 +208,7 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
 
 export function PhaseGuide({ phase, currentRound }: PhaseGuideProps) {
   const info = phaseInfo[phase];
+  const [showTips, setShowTips] = useState(false);
 
   return (
     <motion.div
@@ -208,31 +226,40 @@ export function PhaseGuide({ phase, currentRound }: PhaseGuideProps) {
         </div>
       </div>
 
-      <p className="text-sm text-gray-300 mb-3">{info.description}</p>
+      <p className="text-sm text-gray-300">{info.description}</p>
 
-      {/* Steps */}
-      <div className="bg-gray-900/50 rounded p-3 mb-3">
-        <div className="text-xs text-blue-400 font-semibold mb-2">WHAT TO DO:</div>
-        <ul className="space-y-1">
-          {info.steps.map((step, i) => (
-            <li key={i} className="text-xs text-gray-300 flex items-start gap-2">
-              <span className="text-blue-400">•</span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <button onClick={() => setShowTips(!showTips)} className="text-xs text-indigo-400 hover:text-indigo-300 mt-2 flex items-center gap-1">
+        <span>{showTips ? '▾' : '▸'}</span>
+        <span>{showTips ? 'Hide Tips' : 'Show Tips'}</span>
+      </button>
 
-      {/* Tips */}
-      <div className="space-y-1">
-        <div className="text-xs text-yellow-400 font-semibold">TIPS:</div>
-        {info.tips.map((tip, i) => (
-          <div key={i} className="text-xs text-gray-400 flex items-start gap-2">
-            <span className="text-yellow-400">TIP:</span>
-            <span>{tip}</span>
+      {showTips && (
+        <>
+          {/* Steps */}
+          <div className="bg-gray-900/50 rounded p-3 mb-3 mt-3">
+            <div className="text-xs text-blue-400 font-semibold mb-2">WHAT TO DO:</div>
+            <ul className="space-y-1">
+              {info.steps.map((step, i) => (
+                <li key={i} className="text-xs text-gray-300 flex items-start gap-2">
+                  <span className="text-blue-400">•</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-        ))}
-      </div>
+
+          {/* Tips */}
+          <div className="space-y-1">
+            <div className="text-xs text-yellow-400 font-semibold">TIPS:</div>
+            {info.tips.map((tip, i) => (
+              <div key={i} className="text-xs text-gray-400 flex items-start gap-2">
+                <span className="text-yellow-400">TIP:</span>
+                <span>{tip}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }

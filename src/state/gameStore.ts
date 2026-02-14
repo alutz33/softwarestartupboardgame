@@ -5,13 +5,13 @@ import type {
   GameEvent,
   Player,
   CorporationStrategy,
+  CorporationStyle,
   ActionType,
   Bid,
   CodeBlock,
   Milestone,
   ProductType,
   StartupCard,
-  FundingType,
   PersonaCard,
   PersonaAuctionState,
   HiredEngineer,
@@ -19,15 +19,24 @@ import type {
   DraftPhase,
   PlanningMode,
   SequentialDraftState,
+  AIResearchLevel,
 } from '../types';
 import {
   TOTAL_QUARTERS,
+  ROUNDS_PER_QUARTER,
   MILESTONE_DEFINITIONS,
   PRODUCTION_CONSTANTS,
   AI_POWER_BONUS,
   getTechDebtLevel,
   getAiDebt,
+  createEmptyGrid,
+  createEmptyBuffer,
+  MAU_MILESTONES,
+  SPECIALTY_TO_COLOR,
+  randomTokenColor,
+  TECH_DEBT_BUFFER_SIZE,
 } from '../types';
+import type { TokenPickState } from '../types';
 import {
   FUNDING_OPTIONS,
   TECH_OPTIONS,
@@ -49,6 +58,10 @@ import {
 } from '../data/personaCards';
 import { shuffleThemes, getThemeForRound } from '../data/quarters';
 import { createSprintBag, getMaxDraws, getSprintDebtReduction, getSprintRatingBonus } from '../data/sprintTokens';
+import { generateCodePool } from '../data/codePool';
+import { createAppCardDeck } from '../data/appCards';
+import { expandGrid, matchPatternAtPosition, clearPatternFromGrid } from './gridHelpers';
+import { getStarRating } from '../data/appCards';
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
 
@@ -79,6 +92,49 @@ function buildSequentialDraft(players: Player[]): SequentialDraftState {
     timeoutSeconds: 0,
   };
 }
+
+// Compute a player's running VP total (for snake draft ordering).
+// Lowest VP picks first, giving trailing players catch-up opportunities.
+function getPlayerVP(player: Player): number {
+  let vp = 0;
+  // VP from published apps
+  for (const app of player.publishedApps) {
+    vp += app.vpEarned;
+  }
+  // VP from IPO / acquisition actions
+  vp += player.ipoBonusScore || 0;
+  // VP from production tracks
+  vp += player.productionTracks.mauProduction;
+  vp += player.productionTracks.revenueProduction * 2;
+  return vp;
+}
+
+// Build snake draft pick order sorted by VP (lowest first).
+// Same algorithm as buildSnakePickOrder but using VP instead of MAU.
+function buildSnakePickOrderByVP(players: Player[]): string[] {
+  // Stable sort: tiebreak by player ID so UI and store always produce the same order
+  const sorted = [...players].sort((a, b) => {
+    const vpDiff = getPlayerVP(a) - getPlayerVP(b);
+    if (vpDiff !== 0) return vpDiff;
+    return a.id.localeCompare(b.id);
+  });
+  const ids = sorted.map(p => p.id);
+  const reversed = [...ids].reverse();
+  const maxPicks = players.reduce((sum, p) => sum + p.engineers.length, 0);
+  const rounds = Math.ceil(maxPicks / ids.length) + 1;
+  const order: string[] = [];
+  for (let i = 0; i < rounds; i++) {
+    order.push(...(i % 2 === 0 ? ids : reversed));
+  }
+  return order;
+}
+
+// Interactive actions that require UI interaction (mini-game or token placement).
+// All other actions resolve immediately when an engineer is placed.
+const INTERACTIVE_ACTIONS: ActionType[] = [
+  'develop-features',
+  'optimize-code',
+];
 
 // Helper function to check and claim milestones
 function checkMilestones(
@@ -151,8 +207,11 @@ interface GameStore extends GameState {
 
   // Phase 2: Leader draft & funding selection
   selectLeader: (playerId: string, personaId: string) => void;
-  selectFunding: (playerId: string, fundingType: FundingType) => void;
+  selectFunding: (playerId: string, style: CorporationStyle) => void;
   getDealtLeaderCards: (playerId: string) => PersonaCard[];
+
+  // Phase 2: App card selection (agency players)
+  confirmAppCards: (playerId: string, keptCardIds: string[]) => void;
 
   // Phase 2: Persona auction actions
   startPersonaAuction: (personaCardId: string) => void;
@@ -208,6 +267,21 @@ interface GameStore extends GameState {
   claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => void;
   advanceSequentialDraft: () => void;
 
+  // Action Draft (immediate resolution)
+  startActionDraft: () => void;
+  endTurn: () => void;
+  completeInteractiveAction: () => void;
+  placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => void;
+
+  // Token pick specialty choice
+  resolveSpecialtyChoice: (playerId: string, useSpecialty: boolean) => void;
+
+  // Grid redesign: App and code actions
+  publishApp: (playerId: string, cardId: string, row: number, col: number) => void;
+  claimAppCard: (playerId: string, cardId: string) => void;
+  commitCode: (playerId: string, row: number, col: number, direction?: 'row' | 'col', count?: number) => void;
+  performGridSwap: (playerId: string, r1: number, c1: number, r2: number, c2: number) => void;
+
   // Utility
   getCurrentPlayer: () => Player | undefined;
   getPlayer: (playerId: string) => Player | undefined;
@@ -238,6 +312,18 @@ function createInitialPlayer(index: number): Player {
     powerUsesRemaining: 1, // For powers like Pivot (1 use per game)
     hasPivoted: false,
     ipoBonusScore: 0,
+    // Grid redesign fields
+    codeGrid: createEmptyGrid(0),
+    techDebtBuffer: createEmptyBuffer(),
+    aiResearchLevel: 0 as AIResearchLevel,
+    publishedApps: [],
+    heldAppCards: [],
+    commitCodeUsedThisRound: false,
+    // Action Draft redesign fields
+    marketingStarBonus: 0,
+    committedCodeCount: 0,
+    recurringRevenue: 0,
+    mauMilestonesClaimed: [],
   };
 }
 
@@ -267,6 +353,8 @@ function createInitialState(): GameState {
       bidResults: [],
       occupiedActions: new Map(),
       draftOrder: [],
+      codePool: [],
+      appMarket: [],
     },
     eventDeck: createEventDeck(),
     usedEvents: [],
@@ -279,6 +367,8 @@ function createInitialState(): GameState {
     // Phase 2: Persona card system
     personaDeck: [],
     dealtLeaderCards: new Map(),
+    // Grid redesign: app card deck
+    appCardDeck: [],
   };
 }
 
@@ -303,8 +393,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { dealtCards: dealtStartupCards, remainingDeck: remainingStartupDeck } =
       dealStartupCards(startupDeck, playerCount, 2);
 
+    // Grid redesign: Create app card deck and deal initial market
+    const appCardDeck = createAppCardDeck();
+    const appMarket = appCardDeck.splice(0, 3);
+
+    const initialState = createInitialState();
     set({
-      ...createInitialState(),
+      ...initialState,
       players,
       phase: 'leader-draft', // Phase 2: Start with leader-draft instead of startup-draft
       startupDeck: remainingStartupDeck,
@@ -313,6 +408,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       dealtLeaderCards,
       quarterlyThemes,
       planningMode: planningMode || 'simultaneous',
+      appCardDeck,
+      roundState: {
+        ...initialState.roundState,
+        codePool: generateCodePool(playerCount),
+        appMarket,
+      },
     });
   },
 
@@ -363,12 +464,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
-  selectFunding: (playerId: string, fundingType: FundingType) => {
+  selectFunding: (playerId: string, style: CorporationStyle) => {
     set((state) => {
       const player = state.players.find(p => p.id === playerId);
       if (!player || !player.leader) return state;
 
-      const funding = FUNDING_OPTIONS.find(f => f.id === fundingType)!;
+      // Use angel-backed as the balanced default funding for all players
+      const funding = FUNDING_OPTIONS.find(f => f.id === 'angel-backed')!;
       const leaderBonus = player.leader.leaderSide.startingBonus;
 
       // Product type comes from leader's productLock - use first option
@@ -417,23 +519,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
         Math.max(0, productionTracks.revenueProduction)
       );
 
-      // Create strategy
+      // Create strategy (funding is now standardized; the key choice is corporation style)
       const strategy: CorporationStrategy = {
-        funding: fundingType,
+        funding: 'angel-backed',
         tech: techType as CorporationStrategy['tech'],
         product: productType,
       };
+
+      // Deal 3 app cards from deck to agency players (held temporarily until confirmed)
+      let dealtCards: typeof state.appCardDeck = [];
+      let newAppCardDeck = state.appCardDeck;
+      if (style === 'agency' && state.appCardDeck.length >= 3) {
+        newAppCardDeck = [...state.appCardDeck];
+        dealtCards = newAppCardDeck.splice(0, 3);
+      }
 
       const updatedPlayers = state.players.map(p => {
         if (p.id !== playerId) return p;
         return {
           ...p,
           strategy,
+          corporationStyle: style,
           resources,
           metrics,
           productionTracks,
-          isReady: true,
+          // Agency players must confirm app cards before being ready
+          isReady: style !== 'agency',
           powerUsesRemaining: 1, // Leader power once per game
+          ...(dealtCards.length > 0 ? { dealtAppCards: dealtCards } : {}),
         };
       });
 
@@ -462,6 +575,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return {
           players: updatedPlayers,
           personaDeck: newPersonaDeck,
+          appCardDeck: newAppCardDeck,
           phase: 'engineer-draft' as GamePhase,
           currentRound: 1,
           currentQuarter: 1,
@@ -479,16 +593,91 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
 
-      return { players: updatedPlayers };
+      return { players: updatedPlayers, appCardDeck: newAppCardDeck };
     });
   },
 
   getDealtLeaderCards: (playerId: string) => {
     return get().dealtLeaderCards.get(playerId) || [];
+  },
+
+  confirmAppCards: (playerId: string, keptCardIds: string[]) => {
+    set((state) => {
+      const player = state.players.find(p => p.id === playerId);
+      if (!player || !player.dealtAppCards || keptCardIds.length < 1) return state;
+
+      const keptCards = player.dealtAppCards.filter(c => keptCardIds.includes(c.id));
+      const returnedCards = player.dealtAppCards.filter(c => !keptCardIds.includes(c.id));
+
+      // Return unkept cards to the bottom of the deck
+      const newDeck = [...state.appCardDeck, ...returnedCards];
+
+      const updatedPlayers = state.players.map(p => {
+        if (p.id !== playerId) return p;
+        return {
+          ...p,
+          heldAppCards: keptCards,
+          dealtAppCards: undefined,
+          isReady: true,
+        };
+      });
+
+      // Check if all players have selected (same logic as selectFunding's allSelected)
+      const allSelected = updatedPlayers.every(p => p.strategy && p.isReady);
+
+      if (allSelected) {
+        // Generate first engineer pool
+        let engineerPool = generateEngineerPool(
+          1,
+          updatedPlayers.length,
+          updatedPlayers.map(p => p.hasRecruiterBonus)
+        );
+
+        // Draw 2 persona cards for the round's persona pool
+        const { drawn: personaPool, remainingDeck: newPersonaDeck } =
+          drawPersonasForRound(state.personaDeck, 2);
+
+        // EVENT FORECASTING: Peek at first quarter's event
+        const eventDeck = [...state.eventDeck];
+        const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
+
+        // Initial draft order is random
+        const draftOrder = updatedPlayers.map(p => p.id);
+
+        return {
+          players: updatedPlayers,
+          personaDeck: newPersonaDeck,
+          appCardDeck: newDeck,
+          phase: 'engineer-draft' as GamePhase,
+          currentRound: 1,
+          currentQuarter: 1,
+          roundState: {
+            roundNumber: 1,
+            phase: 'engineer-draft' as GamePhase,
+            engineerPool,
+            personaPool,
+            currentBids: new Map(),
+            bidResults: [],
+            occupiedActions: new Map(),
+            draftOrder,
+            upcomingEvent,
+            activeTheme: getThemeForRound(state.quarterlyThemes, 1),
+            draftPhase: 'generic-draft' as DraftPhase,
+            currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
+          },
+        };
+      }
+
+      return { players: updatedPlayers, appCardDeck: newDeck };
+    });
   },
 
   // ============================================
@@ -634,10 +823,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: finalPlayers,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             personaPool: updatedPersonaPool,
             personaAuction: undefined,
             draftPhase: 'complete' as DraftPhase,
@@ -673,8 +862,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         id => !newPassedPlayers.includes(id)
       );
 
-      // If all but one passed (or all passed with no bidder), auction is complete
-      const isComplete = activeBidders.length <= 1;
+      // Auction completes when: nobody remains, OR exactly one remains who already bid (they win)
+      // If one player remains but nobody has bid yet, they still get a chance to bid at base cost
+      const isComplete = activeBidders.length === 0 ||
+        (activeBidders.length === 1 && !!auction.currentBidderId);
 
       // Helper: transition to next persona auction or to planning phase
       const finishAuction = (
@@ -733,10 +924,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: finalPlayers,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             personaPool: updatedPersonaPool,
             personaAuction: undefined,
             draftPhase: 'complete' as DraftPhase,
@@ -960,6 +1151,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(updatedPlayers.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
@@ -1030,6 +1223,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             // Phase 4: Hybrid auction draft initialization
             draftPhase: 'generic-draft' as DraftPhase,
             currentDraftPickerIndex: 0,
+            codePool: generateCodePool(players.length),
+            appMarket: state.roundState.appMarket,
           },
         };
       }
@@ -1063,10 +1258,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const playersReady = state.players.map(p => ({ ...p, isReady: false }));
         return {
           players: playersReady,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
             ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersReady) } : {}),
@@ -1207,10 +1402,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       return {
         players: playersWithReadyReset,
-        phase: 'planning' as GamePhase,
+        phase: 'action-draft' as GamePhase,
         roundState: {
           ...state.roundState,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           bidResults,
           currentBids: new Map(),
           occupiedActions: new Map(), // Reset for new planning phase
@@ -1355,13 +1550,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         return {
           players: playersWithReadyReset,
-          phase: 'planning' as GamePhase,
+          phase: 'action-draft' as GamePhase,
           roundState: {
             ...state.roundState,
             engineerPool: updatedPool,
             draftPhase: 'complete' as DraftPhase,
             currentDraftPickerIndex: nextPickerIndex,
-            phase: 'planning' as GamePhase,
+            phase: 'action-draft' as GamePhase,
             currentBids: new Map(),
             occupiedActions: new Map(),
             ...(state.planningMode === 'sequential' ? { sequentialDraft: buildSequentialDraft(playersWithReadyReset) } : {}),
@@ -1410,9 +1605,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (!isReassigning && actionSpace.maxWorkers !== undefined) {
         // Count total players occupying this action (not engineers, but players)
         const playersOnAction = new Set(occupied);
+        // Cap to player count since slots track unique players
+        const effectiveMax = Math.min(actionSpace.maxWorkers, state.players.length);
 
         // If this player isn't already on this action, check if there's room
-        if (!playersOnAction.has(playerId) && playersOnAction.size >= actionSpace.maxWorkers) {
+        if (!playersOnAction.has(playerId) && playersOnAction.size >= effectiveMax) {
           // Action space is full - can't assign
           return state;
         }
@@ -1899,6 +2096,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         let newProduction = { ...player.productionTracks };
         let hasRecruiterBonus = player.hasRecruiterBonus;
         let ipoBonusScore = player.ipoBonusScore || 0;
+        let newMarketingStarBonus = player.marketingStarBonus;
+        let newRecurringRevenue = player.recurringRevenue;
+        let newBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
 
         // Determine the last action for "night-owl" trait bonus
         const lastActionIndex = player.plannedActions.length - 1;
@@ -1973,7 +2173,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               totalPower += 2;
             }
             if (useAi) {
-              newResources.techDebt += 1; // Extra debt from volatile AI usage
+              newBuffer.tokens.push(randomTokenColor()); // Extra debt token from volatile AI usage
             }
           }
 
@@ -2047,7 +2247,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
             if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
               aiDebt = 0;
             }
-            newResources.techDebt += aiDebt;
+            // Route AI debt through buffer as colored tokens
+            for (let d = 0; d < aiDebt; d++) {
+              newBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full: cascade adds to techDebt integer
+            while (newBuffer.tokens.length >= newBuffer.maxSize) {
+              newBuffer.tokens.splice(0, newBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
+            }
           }
 
           // ============================================
@@ -2091,6 +2299,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
             }
 
             case 'optimize-code': {
+              // GRID REDESIGN STUB: Each power point = 1 swap on the grid
+              // (swap 2 adjacent tokens' positions to rearrange patterns).
+              // TODO: Add interactive swap UI — player picks pairs of adjacent
+              //       cells to swap, up to `totalPower` swaps per action.
+              //       Requires a modal/overlay showing the grid with swap targets.
+
+              // Keep existing tech debt reduction — still useful in grid system
               newResources.techDebt = Math.max(0, newResources.techDebt - 1);
               // +1 rating (integer), or +2 with double-optimize leader passive (Grace Debugger)
               let optimizeRating = actionSpace.effect.ratingChange || 0;
@@ -2108,10 +2323,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
               if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
                 debtReduction += 1;
               }
-              newResources.techDebt = Math.max(
-                0,
-                newResources.techDebt - debtReduction
-              );
+              // Clear from buffer first, then from techDebt integer
+              for (let r = 0; r < debtReduction; r++) {
+                if (newBuffer.tokens.length > 0) {
+                  newBuffer.tokens.pop();
+                } else {
+                  newResources.techDebt = Math.max(0, newResources.techDebt - 1);
+                }
+              }
               break;
             }
 
@@ -2127,6 +2346,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
               }
               // +5 server capacity (flat, not scaled by power for infrastructure)
               newResources.serverCapacity += 5;
+              // Grid redesign: also expand the code grid
+              if (player.codeGrid.expansionLevel < 2) {
+                const expanded = expandGrid(player.codeGrid);
+                if (expanded) {
+                  player.codeGrid = expanded;
+                }
+              }
               break;
 
             case 'research-ai': {
@@ -2145,10 +2371,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
               if (player.leader?.leaderSide.passive.id === 'gpu-royalties') {
                 newResources.aiCapacity += 1;
               }
+              // Grid redesign: advance AI research level (0 → 1 → 2)
+              if (player.aiResearchLevel < 2) {
+                player.aiResearchLevel = (player.aiResearchLevel + 1) as AIResearchLevel;
+              }
               break;
             }
 
             case 'marketing': {
+              // GRID REDESIGN STUB: Marketing action redesign
+              // TODO: New cost: $2-3 (down from $10-20)
+              // TODO: New effect: +1 star bonus on next published app
+              //       (store as player.marketingStarBonus or similar field)
+              // TODO: Remove MAU-based logic below once grid system is complete
+
               // Pay cost once per action type
               const marketingCost = hasAbility(player, 'marketing-discount') ? 10 : 20;
               if (!costsPaid.has('marketing')) {
@@ -2186,10 +2422,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   newProduction.mauProduction + 1
                 );
               }
+
+              // GRID REDESIGN: Corporation-type marketing effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: +1 star bonus (consumed when publishing an app)
+                newMarketingStarBonus += 1;
+              } else if (player.corporationStyle === 'product') {
+                // Product: advance MAU production track by 1
+                newProduction.mauProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                  newProduction.mauProduction + 1
+                );
+              }
+
               break;
             }
 
             case 'monetization': {
+              // GRID REDESIGN STUB: Monetization action redesign
+              // TODO: New effect: Gain $1 per total star across all published apps
+              //       e.g. const totalStars = player.publishedApps.reduce((s, a) => s + a.stars, 0);
+              //       newResources.money += totalStars;
+              // TODO: Remove MAU/revenue-based logic below once grid system is complete
+
               // Revenue scales with MAU and power
               let revenue = Math.round(
                 (actionSpace.effect.revenueChange || 300) * totalPower * (newMetrics.mau / 1000)
@@ -2230,6 +2485,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
                   newProduction.revenueProduction + 1
                 );
               }
+
+              // GRID REDESIGN: Corporation-type monetization effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: earn $1 per star across all published apps
+                const totalStars = player.publishedApps.reduce((sum, app) => sum + app.stars, 0);
+                newResources.money += totalStars;
+              } else if (player.corporationStyle === 'product') {
+                // Product: +1 recurring revenue ($1 more per round from now on)
+                newRecurringRevenue += 1;
+              }
+
               break;
             }
 
@@ -2423,6 +2689,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
           isReady: false,
           plannedActions: [],
           ipoBonusScore,
+          marketingStarBonus: newMarketingStarBonus,
+          recurringRevenue: newRecurringRevenue,
+          techDebtBuffer: newBuffer,
           engineers: player.engineers.map((e) => ({
             ...e,
             assignedAction: undefined,
@@ -2498,6 +2767,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
         let newResources = { ...player.resources };
         let newMetrics = { ...player.metrics };
+        const newBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
 
         // Apply resource changes
         if (effect.resourceChanges) {
@@ -2507,6 +2777,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
             techDebtChange = 0; // Block positive (damaging) debt changes
           }
 
+          // Route positive debt through buffer; negative debt reduces techDebt directly
+          if (techDebtChange > 0) {
+            for (let d = 0; d < techDebtChange; d++) {
+              newBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full
+            while (newBuffer.tokens.length >= newBuffer.maxSize) {
+              newBuffer.tokens.splice(0, newBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
+            }
+          } else if (techDebtChange < 0) {
+            newResources.techDebt = Math.max(0, newResources.techDebt + techDebtChange);
+          }
+
           newResources = {
             money: newResources.money + (effect.resourceChanges.money || 0),
             serverCapacity:
@@ -2514,7 +2798,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
               (effect.resourceChanges.serverCapacity || 0),
             aiCapacity:
               newResources.aiCapacity + (effect.resourceChanges.aiCapacity || 0),
-            techDebt: Math.max(0, newResources.techDebt + techDebtChange),
+            techDebt: newResources.techDebt,
           };
         }
 
@@ -2551,6 +2835,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ...player,
           resources: newResources,
           metrics: newMetrics,
+          techDebtBuffer: newBuffer,
         };
       }),
       phase: 'round-end' as GamePhase,
@@ -2563,17 +2848,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   endRound: () => {
     const state = get();
-    const nextRound = state.currentRound + 1;
+    const currentQuarter = Math.ceil(state.currentRound / ROUNDS_PER_QUARTER);
+    const nextQuarter = currentQuarter + 1;
+    const nextRound = (nextQuarter - 1) * ROUNDS_PER_QUARTER + 1; // First round of next quarter
 
-    if (nextRound > TOTAL_QUARTERS) {
+    if (nextQuarter > TOTAL_QUARTERS) {
       set({ phase: 'game-end' });
       get().calculateWinner();
       return;
     }
 
-    // Generate new engineer pool
+    // Generate new engineer pool for the new quarter
     let engineerPool = generateEngineerPool(
-      nextRound,
+      nextQuarter,
       state.players.length,
       state.players.map((p) => p.hasRecruiterBonus)
     );
@@ -2581,16 +2868,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // INSIDER INFO ability: Add 2 extra engineers for players with this ability
     const insiderInfoCount = state.players.filter(p => hasAbility(p, 'insider-info')).length;
     if (insiderInfoCount > 0) {
-      const extraEngineers = generateEngineerPool(nextRound, insiderInfoCount, []);
+      const extraEngineers = generateEngineerPool(nextQuarter, insiderInfoCount, []);
       engineerPool = [...engineerPool, ...extraEngineers.slice(0, insiderInfoCount * 2)];
     }
 
-    // EVENT FORECASTING: Peek at next round's event
+    // EVENT FORECASTING: Peek at next quarter's event
     const eventDeck = [...state.eventDeck];
     const upcomingEvent = eventDeck.length > 0 ? eventDeck[eventDeck.length - 1] : undefined;
 
     // MARS-STYLE PRODUCTION: Produce resources based on production track positions
-    // This happens at the start of each new round (before the draft)
+    // This happens at the start of each new quarter (before the draft)
     const playersAfterProduction = state.players.map((p) => {
       const debtLevel = getTechDebtLevel(p.resources.techDebt);
 
@@ -2601,17 +2888,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const mauGain = effectiveMauProd * PRODUCTION_CONSTANTS.MAU_PER_PRODUCTION;
       const moneyGain = effectiveRevProd * PRODUCTION_CONSTANTS.MONEY_PER_PRODUCTION;
 
+      // Product corporation recurring revenue from committed code
+      const recurringIncome = p.corporationStyle === 'product' ? p.recurringRevenue : 0;
+
       return {
         ...p,
+        // Unassign all engineers so they're available for next quarter
+        engineers: p.engineers.map(e => ({ ...e, assignedAction: undefined })),
         metrics: {
           ...p.metrics,
           mau: p.metrics.mau + mauGain,
         },
         resources: {
           ...p.resources,
-          money: p.resources.money + moneyGain,
+          money: p.resources.money + moneyGain + recurringIncome,
         },
         hasRecruiterBonus: false, // Reset recruiter bonus
+        commitCodeUsedThisRound: false, // Reset commit code flag
       };
     });
 
@@ -2621,8 +2914,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       .sort((a, b) => a.metrics.mau - b.metrics.mau)
       .map(p => p.id);
 
-    // Phase 2: Draw persona cards for the round's persona pool
-    const personaDrawCount = nextRound >= 3 ? 3 : 2; // More persona engineers in later rounds
+    // Phase 2: Draw persona cards for the quarter's persona pool
+    const personaDrawCount = nextQuarter >= 3 ? 3 : 2; // More persona engineers in later quarters
     const { drawn: personaPool, remainingDeck: newPersonaDeck } =
       drawPersonasForRound(state.personaDeck, personaDrawCount);
 
@@ -2630,7 +2923,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       players: playersAfterProduction,
       personaDeck: newPersonaDeck,
       currentRound: nextRound,
-      currentQuarter: nextRound,
+      currentQuarter: nextQuarter,
       phase: 'engineer-draft',
       roundState: {
         roundNumber: nextRound,
@@ -2642,10 +2935,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         occupiedActions: new Map(),
         draftOrder,
         upcomingEvent, // Show next quarter's event during planning
-        activeTheme: getThemeForRound(state.quarterlyThemes, nextRound),
+        activeTheme: getThemeForRound(state.quarterlyThemes, nextQuarter),
         // Phase 4: Hybrid auction draft initialization
         draftPhase: 'generic-draft',
         currentDraftPickerIndex: 0,
+        // Refill code pool and app market for new quarter
+        codePool: generateCodePool(state.players.length),
+        appMarket: state.roundState.appMarket,
       },
     });
   },
@@ -2655,21 +2951,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const scores = new Map<string, number>();
 
     for (const player of state.players) {
-      // Base score from metrics
       let score = 0;
 
-      // MAU score (1 point per 1000 MAU)
-      score += player.metrics.mau / 1000;
+      if (player.corporationStyle === 'agency') {
+        // Agency scoring: VP from published app stars
+        for (const app of player.publishedApps) {
+          score += app.vpEarned;
+        }
+      } else {
+        // Product scoring: VP from MAU milestones (unclaimed only)
+        for (const ms of MAU_MILESTONES) {
+          if (
+            player.metrics.mau >= ms.threshold &&
+            !player.mauMilestonesClaimed.includes(ms.id)
+          ) {
+            score += ms.vp;
+          }
+        }
 
-      // Revenue score (1 point per 500 revenue)
-      let revenueMultiplier = 1;
-      if (player.strategy?.funding === 'bootstrapped') {
-        revenueMultiplier = 1.3; // Bootstrapped gets 1.3x revenue scoring
+        // VP from committed code count: 1 VP per 2 committed codes
+        score += Math.floor(player.committedCodeCount / 2);
       }
-      score += (player.metrics.revenue / 500) * revenueMultiplier;
 
-      // Rating score (3 points per rating point on 1-10 scale, max 30)
-      score += player.metrics.rating * 3;
+      // Both types: money conversion (1 VP per $10 remaining)
+      score += Math.floor(player.resources.money / 10);
 
       // MILESTONE BONUSES - Add points for claimed milestones
       for (const milestone of state.milestones) {
@@ -2678,38 +2983,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }
       }
 
-      // LATE-GAME ACTION BONUSES (IPO Prep, Acquisition Target)
+      // IPO / Acquisition bonus
       score += player.ipoBonusScore || 0;
-
-      // Synergy bonuses for specialization
-      // MAU specialist: 50+ points if MAU > all others by 50%
-      // Revenue specialist: 50+ points if revenue > all others by 50%
-      // Rating specialist: 50+ points if rating > all others by 0.5
-
-      // Tech debt penalty (graduated)
-      // 0-3 debt: no penalty
-      // 4-7 debt: -5 points
-      // 8-11 debt: -10 points
-      // 12+ debt: -20 points
-      const techDebt = player.resources.techDebt;
-      if (techDebt >= 12) {
-        score -= 20;
-      } else if (techDebt >= 8) {
-        score -= 10;
-      } else if (techDebt >= 4) {
-        score -= 5;
-      }
-
-      // Production track bonus: +1 per MAU production level, +2 per revenue production level
-      score += player.productionTracks.mauProduction * 1;
-      score += player.productionTracks.revenueProduction * 2;
-
-      // Score is now directly calculated without equity multiplier.
-      // Funding balance comes from starting resources and unique powers:
-      // VC-Heavy: $100 start + pivot power
-      // Angel: $70 start + insider info
-      // Bootstrapped: $40 start + lean team + 1.5x revenue scoring
-      score = Math.round(score);
 
       scores.set(player.id, score);
     }
@@ -2772,7 +3047,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (occupied.includes(playerId)) return true;
 
     // Dual-focus allows claiming an extra slot on exclusive actions
-    const effectiveMax = hasDualFocus ? (actionSpace.maxWorkers + 1) : actionSpace.maxWorkers;
+    // Cap to player count since slots track unique players
+    const baseMax = Math.min(actionSpace.maxWorkers, state.players.length);
+    const effectiveMax = hasDualFocus ? (baseMax + 1) : baseMax;
 
     // Otherwise check if there's room
     return occupied.length < effectiveMax;
@@ -2783,9 +3060,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const actionSpace = getActionSpace(action);
     const occupied = state.roundState.occupiedActions.get(action) || [];
 
+    // Cap maxWorkers to player count (slots represent unique players, not engineers)
+    const effectiveMax = actionSpace.maxWorkers !== undefined
+      ? Math.min(actionSpace.maxWorkers, state.players.length)
+      : undefined;
+
     return {
       current: occupied.length,
-      max: actionSpace.maxWorkers,
+      max: effectiveMax,
       players: occupied,
     };
   },
@@ -2835,13 +3117,401 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   // ============================================
-  // SEQUENTIAL ACTION DRAFT
+  // SEQUENTIAL ACTION DRAFT (legacy — kept for backwards compatibility)
   // ============================================
 
   claimActionSlot: (playerId: string, engineerId: string, actionType: ActionType, useAi: boolean) => {
     const state = get();
 
-    // Only works in sequential planning mode
+    // -------------------------------------------------------
+    // NEW: Action-Draft mode (immediate resolution)
+    // -------------------------------------------------------
+    if (state.phase === 'action-draft') {
+      const turnState = state.roundState.turnState;
+      if (!turnState) return;
+
+      // Use the stored snake order from turnState
+      const snakeOrder = turnState.snakeOrder;
+
+      // Validate it's this player's turn
+      const currentPickerId = snakeOrder[turnState.currentPlayerIndex];
+      if (currentPickerId !== playerId) return;
+
+      // Delegate to the existing assignEngineer logic (place the engineer)
+      get().assignEngineer(playerId, engineerId, actionType, useAi);
+
+      // After placing, resolve the action or start a mini-game
+      if (INTERACTIVE_ACTIONS.includes(actionType)) {
+        // Interactive: set turnState to mini-game and let the UI drive completion
+        set((s) => {
+          // For develop-features, compute token pick allowance based on specialty + AI
+          let tokenPickState: TokenPickState | undefined;
+          if (actionType === 'develop-features') {
+            const player = s.players.find(p => p.id === playerId);
+            const eng = player?.engineers.find(e => e.id === engineerId);
+            const specialtyColor = eng?.specialty ? SPECIALTY_TO_COLOR[eng.specialty] : undefined;
+            // Specialty match: does this engineer's specialty match develop-features?
+            const hasSpecialtyMatch = !!specialtyColor && !!eng?.specialty && getSpecialtyBonus(eng.specialty, actionType) > 0;
+
+            // Token allowance rules:
+            // Base (no specialty match): 1 token of any color
+            // Specialty match: CHOICE → 1 any-color OR 2 specialty-color
+            // AI (no specialty match): 2 tokens of any color
+            // AI + specialty match: CHOICE → 2 any-color OR 3 specialty-color
+            if (hasSpecialtyMatch) {
+              // Player must choose: generic (fewer, any color) vs specialty (more, locked color)
+              const genericPicks = useAi ? 2 : 1;
+              const specialtyPicks = useAi ? 3 : 2;
+              tokenPickState = {
+                maxPicks: 0,          // will be set after choice
+                picksRemaining: 0,
+                specialtyColor: undefined,
+                useAi,
+                engineerId,
+                awaitingSpecialtyChoice: true,
+                specialtyOption: { maxPicks: specialtyPicks, color: specialtyColor! },
+                genericOption: { maxPicks: genericPicks },
+              };
+            } else {
+              const maxPicks = useAi ? 2 : 1;
+              tokenPickState = {
+                maxPicks,
+                picksRemaining: maxPicks,
+                specialtyColor: undefined, // any color
+                useAi,
+                engineerId,
+              };
+            }
+          }
+
+          return {
+            roundState: {
+              ...s.roundState,
+              turnState: {
+                ...s.roundState.turnState!,
+                phase: 'mini-game' as const,
+                pendingAction: actionType,
+                tokenPickState,
+              },
+            },
+          };
+        });
+      } else {
+        // Non-interactive: resolve the action inline immediately
+        set((s) => ({
+          roundState: {
+            ...s.roundState,
+            turnState: {
+              ...s.roundState.turnState!,
+              phase: 'resolving' as const,
+              pendingAction: actionType,
+            },
+          },
+        }));
+
+        // Resolve the non-interactive action for this single engineer
+        set((s) => {
+          const player = s.players.find(p => p.id === playerId);
+          if (!player) return s;
+
+          const engineer = player.engineers.find(e => e.id === engineerId);
+          if (!engineer) return s;
+
+          const actionSpace = getActionSpace(actionType);
+
+          // ---- CALCULATE TOTAL POWER (same logic as resolveActions) ----
+          let effectiveUseAi = useAi;
+          if (engineer.trait === 'ai-skeptic') {
+            effectiveUseAi = false;
+          }
+
+          let totalPower = engineer.power;
+
+          if (effectiveUseAi) {
+            totalPower += AI_POWER_BONUS;
+          }
+
+          const specialtyBonus = getSpecialtyBonus(engineer.specialty, actionType);
+          totalPower += specialtyBonus;
+
+          // Equity-Hungry trait
+          if (engineer.trait === 'equity-hungry' && engineer.roundsRetained >= 2) {
+            totalPower += 1;
+          }
+
+          // Leader passive: enterprise-culture
+          if (player.leader?.leaderSide.passive.id === 'enterprise-culture' &&
+              actionType === 'develop-features') {
+            totalPower += 1;
+          }
+
+          // Persona engineer traits affecting power
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Flat Hierarchy') {
+            const engineersOnSameAction = player.plannedActions.filter(
+              a => a.actionType === actionType
+            ).length;
+            if (engineersOnSameAction === 1) {
+              totalPower += 2;
+            }
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile') {
+            if (actionType === 'research-ai') totalPower += 2;
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Researcher') {
+            if (actionType === 'research-ai') {
+              totalPower += specialtyBonus; // double specialty
+            } else {
+              totalPower -= specialtyBonus; // remove specialty for non-AI
+            }
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Alignment Researcher') {
+            if (actionType === 'research-ai') totalPower += 2;
+            if (player.resources.aiCapacity > 6) totalPower = Math.max(0, totalPower - 1);
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Protocol Purist') {
+            if (actionType === 'pay-down-debt') totalPower += 1;
+          }
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Resilience Architect') {
+            if (actionType === 'upgrade-servers') totalPower += 1;
+          }
+
+          // Tech debt power penalty
+          const currentDebtLevel = getTechDebtLevel(player.resources.techDebt);
+          if (actionType !== 'pay-down-debt') {
+            totalPower = Math.max(0, totalPower + currentDebtLevel.powerPenalty);
+          }
+
+          // ---- BUILD UPDATED PLAYER STATE ----
+          let newResources = { ...player.resources };
+          let newMetrics = { ...player.metrics };
+          let newProduction = { ...player.productionTracks };
+          let newMarketingStarBonus = player.marketingStarBonus;
+          let newRecurringRevenue = player.recurringRevenue;
+          let newTechDebtBuffer = { ...player.techDebtBuffer, tokens: [...player.techDebtBuffer.tokens] };
+
+          // Generate tech debt from AI usage
+          if (effectiveUseAi) {
+            let aiDebt = getAiDebt(engineer.level);
+            if (player.strategy?.tech === 'ai-first') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (player.leader?.leaderSide.passive.id === 'efficient-ai') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (player.leader?.leaderSide.passive.id === 'alignment-tax') {
+              aiDebt = 0;
+              newMetrics.rating = Math.max(1, newMetrics.rating - 1);
+            }
+            if (engineer.isPersona && engineer.personaTrait?.name === 'Decentralist') {
+              aiDebt = Math.ceil(aiDebt * 0.5);
+            }
+            if (engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline") {
+              aiDebt = 0;
+            }
+            // Volatile trait: AI usage adds +1 extra debt token
+            if (engineer.isPersona && engineer.personaTrait?.name === 'Volatile' && effectiveUseAi) {
+              newTechDebtBuffer.tokens.push(randomTokenColor());
+            }
+            // Route AI debt through buffer as colored tokens
+            for (let d = 0; d < aiDebt; d++) {
+              newTechDebtBuffer.tokens.push(randomTokenColor());
+            }
+            // Flush buffer when full: cascade adds to techDebt integer
+            while (newTechDebtBuffer.tokens.length >= newTechDebtBuffer.maxSize) {
+              newTechDebtBuffer.tokens.splice(0, newTechDebtBuffer.maxSize);
+              newResources.techDebt += TECH_DEBT_BUFFER_SIZE;
+            }
+          }
+
+          // Parallel Processor: Research AI gives +1 server capacity
+          if (engineer.isPersona && engineer.personaTrait?.name === 'Parallel Processor') {
+            if (actionType === 'research-ai') newResources.serverCapacity += 1;
+          }
+
+          // Track for Community Manager / Admiral's Discipline
+          const ratingBeforeAction = newMetrics.rating;
+          const hasCommunityManager = engineer.isPersona && engineer.personaTrait?.name === 'Community Manager';
+          const debtBeforeAction = newResources.techDebt;
+          const hasAdmiralsDiscipline = engineer.isPersona && engineer.personaTrait?.name === "Admiral's Discipline";
+
+          // ---- APPLY ACTION EFFECTS ----
+          switch (actionType) {
+            case 'pay-down-debt': {
+              let debtReduction = 2;
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Optimizer') {
+                debtReduction += 1;
+              }
+              // Clear from buffer first, then from techDebt integer
+              for (let r = 0; r < debtReduction; r++) {
+                if (newTechDebtBuffer.tokens.length > 0) {
+                  newTechDebtBuffer.tokens.pop();
+                } else {
+                  newResources.techDebt = Math.max(0, newResources.techDebt - 1);
+                }
+              }
+              break;
+            }
+
+            case 'upgrade-servers': {
+              if (newResources.money >= 10) {
+                newResources.money -= 10;
+                newResources.serverCapacity += 5;
+              }
+              break;
+            }
+
+            case 'research-ai': {
+              if (newResources.money >= 15) {
+                newResources.money -= 15;
+                newResources.aiCapacity += 2;
+                if (player.leader?.leaderSide.passive.id === 'gpu-royalties') {
+                  newResources.aiCapacity += 1;
+                }
+              }
+              break;
+            }
+
+            case 'marketing': {
+              const marketingCost = hasAbility(player, 'marketing-discount') ? 10 : 20;
+              if (newResources.money >= marketingCost) {
+                newResources.money -= marketingCost;
+                let mauGain = (actionSpace.effect.mauChange || 200) * totalPower;
+                if (player.strategy?.funding === 'vc-heavy') {
+                  mauGain += (actionSpace.effect.mauChange || 200) * 2;
+                }
+                mauGain = Math.round(mauGain * newMetrics.rating / 5);
+                newMetrics.mau += mauGain;
+                newMetrics.rating = Math.min(10, newMetrics.rating + (actionSpace.effect.ratingChange || 0));
+                if (player.leader?.leaderSide.passive.id === 'trust-safety') {
+                  newMetrics.rating = Math.min(10, newMetrics.rating + 1);
+                }
+                if (engineer.isPersona &&
+                    (engineer.personaTrait?.name === 'Growth Hacker' ||
+                     engineer.personaTrait?.name === 'Content Algorithm')) {
+                  newProduction.mauProduction = Math.min(
+                    PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction + 1
+                  );
+                }
+
+                // GRID REDESIGN: Corporation-type marketing effects
+                if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                  // Agency: +1 star bonus (consumed when publishing an app)
+                  newMarketingStarBonus += 1;
+                } else if (player.corporationStyle === 'product') {
+                  // Product: advance MAU production track by 1
+                  newProduction.mauProduction = Math.min(
+                    PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+                    newProduction.mauProduction + 1
+                  );
+                }
+              }
+              break;
+            }
+
+            case 'monetization': {
+              let revenue = Math.round(
+                (actionSpace.effect.revenueChange || 300) * totalPower * (newMetrics.mau / 1000)
+              );
+              if (hasAbility(player, 'revenue-boost')) {
+                revenue = Math.round(revenue * 1.2);
+              }
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Enterprise Sales') {
+                revenue += 5;
+              }
+              newMetrics.revenue += revenue;
+              newMetrics.rating = Math.max(1, newMetrics.rating + (actionSpace.effect.ratingChange || 0));
+              newProduction.revenueProduction = Math.min(
+                PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION,
+                newProduction.revenueProduction + (actionSpace.effect.revenueProductionDelta || 0)
+              );
+              if (player.leader?.leaderSide.passive.id === 'saas-compounding') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction + 1
+                );
+              }
+              if (engineer.isPersona && engineer.personaTrait?.name === 'Monetizer') {
+                newProduction.revenueProduction = Math.min(
+                  PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction + 1
+                );
+              }
+
+              // GRID REDESIGN: Corporation-type monetization effects
+              if (player.corporationStyle === 'agency' || !player.corporationStyle) {
+                // Agency: earn $1 per star across all published apps
+                const totalStars = player.publishedApps.reduce((sum, app) => sum + app.stars, 0);
+                newResources.money += totalStars;
+              } else if (player.corporationStyle === 'product') {
+                // Product: +1 recurring revenue ($1 more per round from now on)
+                newRecurringRevenue += 1;
+              }
+
+              break;
+            }
+
+            default:
+              break;
+          }
+
+          // Post-action trait guards
+          if (hasCommunityManager && newMetrics.rating < ratingBeforeAction) {
+            newMetrics.rating = ratingBeforeAction;
+          }
+          if (hasAdmiralsDiscipline && newResources.techDebt > debtBeforeAction) {
+            newResources.techDebt = debtBeforeAction;
+          }
+
+          // Leader passive: hype-machine
+          if (player.leader?.leaderSide.passive.id === 'hype-machine') {
+            const variance = Math.floor(Math.random() * 401) - 200;
+            newMetrics.mau = Math.max(0, newMetrics.mau + 500 + variance);
+          }
+
+          // Clamp
+          newProduction.mauProduction = Math.max(0, Math.min(
+            PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION, newProduction.mauProduction
+          ));
+          newProduction.revenueProduction = Math.max(0, Math.min(
+            PRODUCTION_CONSTANTS.MAX_REVENUE_PRODUCTION, newProduction.revenueProduction
+          ));
+          newMetrics.rating = Math.max(1, Math.min(10, Math.round(newMetrics.rating)));
+
+          // Update the player in the players array
+          const updatedPlayers = s.players.map(p => {
+            if (p.id !== playerId) return p;
+            return {
+              ...p,
+              resources: newResources,
+              metrics: newMetrics,
+              productionTracks: newProduction,
+              marketingStarBonus: newMarketingStarBonus,
+              recurringRevenue: newRecurringRevenue,
+              techDebtBuffer: newTechDebtBuffer,
+            };
+          });
+
+          return {
+            players: updatedPlayers,
+            roundState: {
+              ...s.roundState,
+              turnState: {
+                ...s.roundState.turnState!,
+                phase: 'free-actions' as const,
+                pendingAction: undefined,
+              },
+            },
+          };
+        });
+
+        // Auto-advance: call endTurn after immediate resolution
+        get().endTurn();
+      }
+
+      return;
+    }
+
+    // -------------------------------------------------------
+    // LEGACY: Sequential planning mode (kept for backwards compatibility)
+    // -------------------------------------------------------
     if (state.planningMode !== 'sequential') return;
 
     const draft = state.roundState.sequentialDraft;
@@ -2960,6 +3630,534 @@ export const useGameStore = create<GameStore>((set, get) => ({
             currentPickerIndex: nextIndex,
           },
         },
+      };
+    });
+  },
+
+  // ============================================
+  // ACTION DRAFT: Immediate Resolution Mode
+  // ============================================
+
+  startActionDraft: () => {
+    set((state) => {
+      const snakeOrder = buildSnakePickOrderByVP(state.players);
+      return {
+        phase: 'action-draft' as GamePhase,
+        roundState: {
+          ...state.roundState,
+          phase: 'action-draft' as GamePhase,
+          turnState: {
+            currentPlayerIndex: 0,
+            phase: 'free-actions' as const,
+            snakeOrder,
+          },
+        },
+      };
+    });
+  },
+
+  endTurn: () => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState) return state;
+
+      // Use the stored snake order from turnState (computed once per round)
+      const snakeOrder = turnState.snakeOrder;
+
+      // Count total engineers and total placed engineers
+      const totalEngineers = state.players.reduce(
+        (sum, p) => sum + p.engineers.length, 0
+      );
+      const placedEngineers = state.players.reduce(
+        (sum, p) => sum + p.engineers.filter(e => e.assignedAction).length, 0
+      );
+
+      // Check if all engineers have been placed (round is complete)
+      const allPlaced = placedEngineers >= totalEngineers;
+
+      if (!allPlaced) {
+        // Advance to the next player in snake order
+        let nextIndex = turnState.currentPlayerIndex + 1;
+
+        // Wrap around
+        if (nextIndex >= snakeOrder.length) {
+          nextIndex = 0;
+        }
+
+        // Skip players who have no unassigned engineers
+        let attempts = 0;
+        const maxAttempts = snakeOrder.length;
+        while (attempts < maxAttempts) {
+          const nextPlayerId = snakeOrder[nextIndex];
+          const nextPlayer = state.players.find(p => p.id === nextPlayerId);
+          const hasUnassigned = nextPlayer?.engineers.some(e => !e.assignedAction);
+
+          if (hasUnassigned) break;
+
+          nextIndex = (nextIndex + 1) % snakeOrder.length;
+          attempts++;
+        }
+
+        // If nobody has unassigned engineers, treat as all placed
+        if (attempts < maxAttempts) {
+          return {
+            roundState: {
+              ...state.roundState,
+              turnState: {
+                ...turnState,
+                currentPlayerIndex: nextIndex,
+                phase: 'free-actions' as const,
+              },
+            },
+          };
+        }
+      }
+
+      // All engineers placed — this round of the action draft is complete.
+      // Check if this is the last round of the quarter OR if code pool is depleted.
+      const roundInQuarter = ((state.currentRound - 1) % ROUNDS_PER_QUARTER) + 1;
+      const isLastRoundOfQuarter = roundInQuarter >= ROUNDS_PER_QUARTER;
+      const isCodePoolEmpty = state.roundState.codePool.length === 0;
+
+      if (isLastRoundOfQuarter || isCodePoolEmpty) {
+        // End of quarter: go to event phase for quarterly cleanup
+        return {
+          phase: 'event' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'event' as GamePhase,
+            turnState: undefined,
+          },
+        };
+      } else {
+        // Mid-quarter: unassign engineers, reset per-round flags, start next round
+        const nextRound = state.currentRound + 1;
+        const newPlayers = state.players.map(p => ({
+          ...p,
+          engineers: p.engineers.map(e => ({ ...e, assignedAction: undefined })),
+          commitCodeUsedThisRound: false,
+        }));
+        const newSnakeOrder = buildSnakePickOrderByVP(newPlayers);
+        return {
+          currentRound: nextRound,
+          players: newPlayers,
+          phase: 'action-draft' as GamePhase,
+          roundState: {
+            ...state.roundState,
+            phase: 'action-draft' as GamePhase,
+            occupiedActions: new Map(),
+            turnState: {
+              currentPlayerIndex: 0,
+              phase: 'free-actions' as const,
+              snakeOrder: newSnakeOrder,
+            },
+          },
+        };
+      }
+    });
+  },
+
+  completeInteractiveAction: () => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game') return state;
+
+      return {
+        roundState: {
+          ...state.roundState,
+          turnState: {
+            ...turnState,
+            phase: 'free-actions' as const,
+            pendingAction: undefined,
+          },
+        },
+      };
+    });
+    // Auto-advance to next player after interactive action resolves
+    get().endTurn();
+  },
+
+  resolveSpecialtyChoice: (_playerId: string, useSpecialty: boolean) => {
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game') return state;
+      const pickState = turnState.tokenPickState;
+      if (!pickState?.awaitingSpecialtyChoice) return state;
+
+      let maxPicks: number;
+      let specialtyColor: typeof pickState.specialtyColor;
+      if (useSpecialty && pickState.specialtyOption) {
+        maxPicks = pickState.specialtyOption.maxPicks;
+        specialtyColor = pickState.specialtyOption.color;
+      } else {
+        maxPicks = pickState.genericOption?.maxPicks ?? 1;
+        specialtyColor = undefined;
+      }
+
+      return {
+        roundState: {
+          ...state.roundState,
+          turnState: {
+            ...turnState,
+            tokenPickState: {
+              ...pickState,
+              maxPicks,
+              picksRemaining: maxPicks,
+              specialtyColor,
+              awaitingSpecialtyChoice: false,
+              specialtyOption: undefined,
+              genericOption: undefined,
+            },
+          },
+        },
+      };
+    });
+  },
+
+  placeTokenOnGrid: (playerId: string, tokenIndex: number, row: number, col: number) => {
+    let finished = false;
+    set((state) => {
+      const turnState = state.roundState.turnState;
+      if (!turnState || turnState.phase !== 'mini-game' || turnState.pendingAction !== 'develop-features') {
+        return state;
+      }
+
+      const pool = state.roundState.codePool;
+      if (tokenIndex < 0 || tokenIndex >= pool.length) return state;
+
+      const playerIndex = state.players.findIndex(p => p.id === playerId);
+      if (playerIndex === -1) return state;
+
+      const player = state.players[playerIndex];
+      const grid = player.codeGrid;
+      if (row < 0 || row >= grid.cells.length || col < 0 || col >= grid.cells[0].length) return state;
+      if (grid.cells[row][col] !== null) return state; // cell must be empty
+
+      const tokenColor = pool[tokenIndex];
+
+      // Validate color restriction from tokenPickState
+      const pickState = turnState.tokenPickState;
+      if (pickState?.specialtyColor && tokenColor !== pickState.specialtyColor) {
+        return state; // wrong color for specialty pick
+      }
+
+      // Build updated pool (remove the token at tokenIndex)
+      const newPool = [...pool];
+      newPool.splice(tokenIndex, 1);
+
+      // Build updated grid (place the token)
+      const newCells = grid.cells.map(r => [...r]);
+      newCells[row][col] = tokenColor;
+
+      const updatedPlayers = state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          codeGrid: { ...p.codeGrid, cells: newCells },
+        };
+      });
+
+      // Check if more picks remain
+      const newPicksRemaining = pickState ? pickState.picksRemaining - 1 : 0;
+      const isDone = newPicksRemaining <= 0 || newPool.length === 0;
+
+      if (isDone) {
+        finished = true;
+        // All picks used or pool empty — return to free-actions
+        return {
+          players: updatedPlayers,
+          roundState: {
+            ...state.roundState,
+            codePool: newPool,
+            turnState: {
+              ...turnState,
+              phase: 'free-actions' as const,
+              pendingAction: undefined,
+              tokenPickState: undefined,
+            },
+          },
+        };
+      } else {
+        // More picks remaining — stay in mini-game
+        return {
+          players: updatedPlayers,
+          roundState: {
+            ...state.roundState,
+            codePool: newPool,
+            turnState: {
+              ...turnState,
+              tokenPickState: pickState ? {
+                ...pickState,
+                picksRemaining: newPicksRemaining,
+              } : undefined,
+            },
+          },
+        };
+      }
+    });
+    // Auto-advance to next player after all tokens placed
+    if (finished) {
+      get().endTurn();
+    }
+  },
+
+  // ============================================
+  // GRID REDESIGN: APP & CODE ACTIONS
+  // ============================================
+
+  publishApp: (playerId: string, cardId: string, row: number, col: number) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Find the card in player's hand
+    const cardIndex = player.heldAppCards.findIndex(c => c.id === cardId);
+    if (cardIndex === -1) return;
+    const card = player.heldAppCards[cardIndex];
+
+    // Count matched tokens at the given position, plus marketing star bonus
+    const baseMatched = matchPatternAtPosition(player.codeGrid, card.pattern, row, col);
+    const matched = baseMatched + (player.marketingStarBonus || 0);
+    const stars = getStarRating(card, matched);
+
+    // Calculate VP and money based on star fraction
+    const vpEarned = Math.max(1, Math.floor(card.maxVP * (stars / 5)));
+    const moneyEarned = Math.floor(card.maxMoney * (stars / 5));
+
+    // Clear matched pattern cells from grid
+    const newGrid = clearPatternFromGrid(player.codeGrid, card.pattern, row, col);
+
+    // Remove card from hand
+    const newHeldCards = [...player.heldAppCards];
+    newHeldCards.splice(cardIndex, 1);
+
+    const publishedApp = {
+      cardId: card.id,
+      name: card.name,
+      stars,
+      vpEarned,
+      moneyEarned,
+    };
+
+    set((state) => ({
+      players: state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          publishedApps: [...p.publishedApps, publishedApp],
+          resources: { ...p.resources, money: p.resources.money + moneyEarned },
+          codeGrid: newGrid,
+          heldAppCards: newHeldCards,
+          marketingStarBonus: 0, // Consumed on publish
+        };
+      }),
+    }));
+  },
+
+  claimAppCard: (playerId: string, cardId: string) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Enforce hand limit of 3
+    if (player.heldAppCards.length >= 3) return;
+
+    // Find card in market
+    const marketIndex = state.roundState.appMarket.findIndex(c => c.id === cardId);
+    if (marketIndex === -1) return;
+    const card = state.roundState.appMarket[marketIndex];
+
+    // Remove card from market
+    const newMarket = [...state.roundState.appMarket];
+    newMarket.splice(marketIndex, 1);
+
+    // Refill market from deck
+    const newDeck = [...state.appCardDeck];
+    if (newDeck.length > 0) {
+      newMarket.push(newDeck.shift()!);
+    }
+
+    set((state) => ({
+      players: state.players.map((p, i) => {
+        if (i !== playerIndex) return p;
+        return {
+          ...p,
+          heldAppCards: [...p.heldAppCards, card],
+        };
+      }),
+      roundState: {
+        ...state.roundState,
+        appMarket: newMarket,
+      },
+      appCardDeck: newDeck,
+    }));
+  },
+
+  commitCode: (playerId: string, row: number, col: number, direction?: 'row' | 'col', count?: number) => {
+    const state = get();
+    const playerIndex = state.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return;
+    const player = state.players[playerIndex];
+
+    // Cannot commit twice in same round
+    if (player.commitCodeUsedThisRound) return;
+
+    const style = player.corporationStyle;
+    const cells = player.codeGrid.cells;
+
+    // ---- Commit Scoring Table ----
+    // Blocks | Agency VP / $ | Product VP / MAU Prod / $
+    // 1      | 1 VP / $0     | 0 VP / +0 / $1
+    // 3      | 3 VP / $1     | 2 VP / +1 / $2
+    // 4      | 5 VP / $2     | 3 VP / +1 / $3
+    // 5      | 7 VP / $3     | 5 VP / +2 / $5
+
+    if (style === 'agency' && !direction) {
+      // Agency single-token commit: remove 1 token at (row, col), earn 1 VP
+      const cell = cells[row]?.[col];
+      if (cell === null || cell === undefined) return;
+
+      const newCells = cells.map(r => [...r]);
+      newCells[row][col] = null;
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          // 1 block = 1 VP
+          const vpEarned = 1;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            codeGrid: { ...p.codeGrid, cells: newCells },
+            publishedApps: [
+              ...p.publishedApps,
+              { cardId: `commit-${Date.now()}`, name: 'Code Commit', stars: 1, vpEarned, moneyEarned: 0, pattern: [] },
+            ],
+          };
+        }),
+      }));
+    } else if (direction && count) {
+      // Multi-token commit: validate line pattern and clear tokens
+      const requiredCount = count;
+      const startColor = cells[row]?.[col];
+      if (startColor === null || startColor === undefined) return;
+
+      // Collect tokens in the line
+      const tokens: Array<{ r: number; c: number; color: string }> = [];
+      for (let i = 0; i < requiredCount; i++) {
+        const r = direction === 'col' ? row + i : row;
+        const c = direction === 'row' ? col + i : col;
+        if (r >= cells.length || c >= cells[0].length) return;
+        const cellColor = cells[r][c];
+        if (cellColor === null || cellColor === undefined) return;
+        tokens.push({ r, c, color: cellColor });
+      }
+
+      // Validate: all same color (count=3) or all different (count=4+)
+      const colors = new Set(tokens.map(t => t.color));
+      let valid = false;
+      if (requiredCount === 3 && colors.size === 1) valid = true;
+      if (requiredCount === 4 && colors.size === 4) valid = true;
+      if (requiredCount === 5 && colors.size === 1) valid = true; // 5 same-color for max combo
+      if (!valid) return;
+
+      const newCells = cells.map(r => [...r]);
+      for (const t of tokens) {
+        newCells[t.r][t.c] = null;
+      }
+
+      // Scale rewards by block count
+      let vpEarned: number;
+      let moneyEarned: number;
+      let mauProdGain: number;
+
+      if (style === 'agency' || !style) {
+        // Agency scoring: VP + $ based on blocks
+        if (requiredCount >= 5) { vpEarned = 7; moneyEarned = 3; mauProdGain = 0; }
+        else if (requiredCount === 4) { vpEarned = 5; moneyEarned = 2; mauProdGain = 0; }
+        else { vpEarned = 3; moneyEarned = 1; mauProdGain = 0; }
+      } else {
+        // Product scoring: VP + MAU production + $
+        if (requiredCount >= 5) { vpEarned = 5; moneyEarned = 5; mauProdGain = 2; }
+        else if (requiredCount === 4) { vpEarned = 3; moneyEarned = 3; mauProdGain = 1; }
+        else { vpEarned = 2; moneyEarned = 2; mauProdGain = 1; }
+      }
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            resources: { ...p.resources, money: p.resources.money + moneyEarned },
+            codeGrid: { ...p.codeGrid, cells: newCells },
+            productionTracks: {
+              ...p.productionTracks,
+              mauProduction: Math.min(
+                p.productionTracks.mauProduction + mauProdGain,
+                PRODUCTION_CONSTANTS.MAX_MAU_PRODUCTION,
+              ),
+            },
+            publishedApps: [
+              ...p.publishedApps,
+              { cardId: `commit-${Date.now()}`, name: `Code Commit (${requiredCount})`, stars: Math.min(5, requiredCount), vpEarned, moneyEarned, pattern: [] },
+            ],
+          };
+        }),
+      }));
+    } else if (style === 'product' && !direction) {
+      // Product single-token commit: remove 1 token for $1, no VP
+      const cell = cells[row]?.[col];
+      if (cell === null || cell === undefined) return;
+
+      const newCells = cells.map(r => [...r]);
+      newCells[row][col] = null;
+
+      set((state) => ({
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            commitCodeUsedThisRound: true,
+            resources: { ...p.resources, money: p.resources.money + 1 },
+            codeGrid: { ...p.codeGrid, cells: newCells },
+          };
+        }),
+      }));
+    }
+  },
+
+  performGridSwap: (playerId: string, r1: number, c1: number, r2: number, c2: number) => {
+    set((state) => {
+      const playerIndex = state.players.findIndex(p => p.id === playerId);
+      if (playerIndex === -1) return state;
+      const player = state.players[playerIndex];
+      const cells = player.codeGrid.cells;
+
+      // Both cells must be occupied (non-null)
+      if (cells[r1]?.[c1] == null || cells[r2]?.[c2] == null) return state;
+
+      // Cells must be adjacent (differ by 1 in exactly one dimension)
+      const dr = Math.abs(r1 - r2);
+      const dc = Math.abs(c1 - c2);
+      if (!((dr === 1 && dc === 0) || (dr === 0 && dc === 1))) return state;
+
+      // Perform the swap
+      const newCells = cells.map(row => [...row]);
+      const tmp = newCells[r1][c1];
+      newCells[r1][c1] = newCells[r2][c2];
+      newCells[r2][c2] = tmp;
+
+      return {
+        players: state.players.map((p, i) => {
+          if (i !== playerIndex) return p;
+          return {
+            ...p,
+            codeGrid: { ...p.codeGrid, cells: newCells },
+          };
+        }),
       };
     });
   },

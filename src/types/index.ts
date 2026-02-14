@@ -3,7 +3,8 @@
 // ============================================
 
 export const TOTAL_QUARTERS = 4;
-export const TOTAL_ROUNDS = TOTAL_QUARTERS; // Backwards compatibility alias
+export const ROUNDS_PER_QUARTER = 3;
+export const TOTAL_ROUNDS = TOTAL_QUARTERS * ROUNDS_PER_QUARTER; // 12 rounds total
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 2;
 
@@ -465,6 +466,20 @@ export interface Player {
   hasPivoted: boolean; // Track if VC-Heavy has used their pivot
   // IPO/Acquisition tracking for late-game actions
   ipoBonusScore: number; // Score bonus from IPO Prep action
+  // Grid redesign fields
+  codeGrid: CodeGrid;
+  techDebtBuffer: TechDebtBuffer;
+  aiResearchLevel: AIResearchLevel;
+  publishedApps: PublishedApp[];
+  heldAppCards: AppCard[];
+  dealtAppCards?: AppCard[];            // Temporary: cards dealt at funding selection, awaiting player choice
+  corporationStyle?: CorporationStyle;
+  commitCodeUsedThisRound: boolean;
+  // Action Draft redesign fields
+  marketingStarBonus: number;       // +1 star bonus from marketing (agency), consumed on publish
+  committedCodeCount: number;       // total successful commit-code actions (product scoring)
+  recurringRevenue: number;         // $1/round per committed code (product), applied at round end
+  mauMilestonesClaimed: string[];   // which MAU milestone IDs have been scored (product)
 }
 
 // ============================================
@@ -478,11 +493,12 @@ export type GamePhase =
   | 'startup-draft'           // Legacy: Terraforming Mars-style startup card selection
   | 'corporation-selection'   // Legacy: kept for backwards compatibility
   | 'engineer-draft'
-  | 'planning'
-  | 'reveal'
+  | 'action-draft'            // NEW: Real-time action draft with immediate resolution
+  | 'planning'                // Legacy: kept for backwards compatibility
+  | 'reveal'                  // Legacy: kept for backwards compatibility
   | 'puzzle'
   | 'sprint'                    // Phase 3: Push-your-luck sprint mini-game
-  | 'resolution'
+  | 'resolution'              // Legacy: kept for backwards compatibility
   | 'event'
   | 'round-end'
   | 'game-end';
@@ -521,6 +537,11 @@ export interface RoundState {
   // Phase 4: Hybrid auction draft tracking
   draftPhase?: DraftPhase;              // Which sub-phase of the draft we're in
   currentDraftPickerIndex?: number;     // Index into draftOrder for whose turn it is to pick
+  // Grid redesign: shared code pool and app card market
+  codePool: TokenColor[];               // Shared pool of code tokens available this round
+  appMarket: AppCard[];                 // Face-up app cards available for claiming
+  // Action Draft: turn tracking within the draft
+  turnState?: TurnState;
 }
 
 // ============================================
@@ -552,8 +573,8 @@ export const MILESTONE_DEFINITIONS = [
 export interface GameState {
   id: string;
   phase: GamePhase;
-  currentRound: number; // Now represents quarters (Q1-Q4)
-  currentQuarter: number; // Alias for currentRound
+  currentRound: number; // 1-12 (3 rounds per quarter)
+  currentQuarter: number; // 1-4, derived from Math.ceil(currentRound / ROUNDS_PER_QUARTER)
   players: Player[];
   currentPlayerIndex: number;
   roundState: RoundState;
@@ -568,6 +589,8 @@ export interface GameState {
   // Phase 2: Persona card system
   personaDeck: PersonaCard[];          // Remaining persona cards (shuffled into engineer pool)
   dealtLeaderCards: Map<string, PersonaCard[]>; // playerId -> dealt leader cards (pick 1 of 3)
+  // Grid redesign: app card deck
+  appCardDeck: AppCard[];              // Remaining app cards to deal into market
   winner?: string;
   finalScores?: Map<string, number>;
 }
@@ -786,4 +809,133 @@ export interface PersonaCard {
   name: string;                // Display name e.g. "William Doors"
   leaderSide: LeaderSide;
   engineerSide: PersonaEngineerSide;
+}
+
+// ============================================================
+// GRID SYSTEM TYPES (Code Grid Redesign)
+// ============================================================
+
+// Token colors map to engineer specialties
+export type TokenColor = 'green' | 'orange' | 'blue' | 'purple';
+
+export const TOKEN_COLORS: TokenColor[] = ['green', 'orange', 'blue', 'purple'];
+
+// Maps specialty -> token color
+export const SPECIALTY_TO_COLOR: Record<string, TokenColor> = {
+  frontend: 'green',
+  backend: 'orange',
+  fullstack: 'blue',
+  devops: 'purple',
+};
+
+// Grid expansion levels: 0 = 4x4, 1 = 4x5, 2 = 5x5
+export interface GridSize {
+  rows: number;
+  cols: number;
+}
+
+export const GRID_SIZES: GridSize[] = [
+  { rows: 4, cols: 4 },
+  { rows: 4, cols: 5 },
+  { rows: 5, cols: 5 },
+];
+
+// A cell is either null (empty) or holds a token color
+export type GridCell = TokenColor | null;
+
+// The player's code grid
+export interface CodeGrid {
+  cells: GridCell[][];
+  expansionLevel: number; // 0, 1, or 2
+}
+
+export function createEmptyGrid(expansionLevel: number = 0): CodeGrid {
+  const size = GRID_SIZES[expansionLevel];
+  const cells: GridCell[][] = Array.from({ length: size.rows }, () =>
+    Array.from({ length: size.cols }, () => null)
+  );
+  return { cells, expansionLevel };
+}
+
+// Tech debt buffer
+export const TECH_DEBT_BUFFER_SIZE = 4;
+
+export interface TechDebtBuffer {
+  tokens: TokenColor[];
+  maxSize: number;
+}
+
+export function createEmptyBuffer(): TechDebtBuffer {
+  return { tokens: [], maxSize: TECH_DEBT_BUFFER_SIZE };
+}
+
+// Helper: get a random token color
+export function randomTokenColor(): TokenColor {
+  return TOKEN_COLORS[Math.floor(Math.random() * TOKEN_COLORS.length)];
+}
+
+// AI research level (0-2)
+export type AIResearchLevel = 0 | 1 | 2;
+
+// Corporation style (replaces FundingType)
+export type CorporationStyle = 'agency' | 'product';
+
+// Turn state within Action Draft phase
+export type TurnPhase = 'free-actions' | 'place-engineer' | 'resolving' | 'mini-game';
+
+// Token pick state for develop-features mini-game
+export interface TokenPickState {
+  maxPicks: number;           // total tokens the player can pick this action
+  picksRemaining: number;     // how many more tokens can be placed
+  specialtyColor?: TokenColor; // if set, specialty-matching tokens only (or any color if undefined)
+  useAi: boolean;             // whether AI augmentation is active (affects tech debt)
+  engineerId: string;         // the engineer performing this action
+  awaitingSpecialtyChoice?: boolean; // true when player must choose specialty vs generic picks
+  specialtyOption?: { maxPicks: number; color: TokenColor }; // the specialty-color option
+  genericOption?: { maxPicks: number };                      // the any-color option
+}
+
+export interface TurnState {
+  currentPlayerIndex: number;
+  phase: TurnPhase;
+  pendingAction?: ActionType; // action being resolved (for interactive resolution)
+  snakeOrder: string[]; // pre-computed snake draft order for this round (stored so UI and store stay in sync)
+  tokenPickState?: TokenPickState; // multi-token pick tracking for develop-features
+}
+
+// MAU Milestones (Product corporation scoring)
+export const MAU_MILESTONES = [
+  { id: 'mau-1k', threshold: 1000, vp: 1 },
+  { id: 'mau-2.5k', threshold: 2500, vp: 2 },
+  { id: 'mau-5k', threshold: 5000, vp: 3 },
+  { id: 'mau-10k', threshold: 10000, vp: 5 },
+] as const;
+
+// ============================================================
+// APP CARD TYPES
+// ============================================================
+
+export type AppCardTier = 'small' | 'medium' | 'large';
+
+export interface AppCard {
+  id: string;
+  name: string;
+  client: string;
+  tier: AppCardTier;
+  footprint: GridSize; // rows x cols bounding box
+  pattern: GridCell[][]; // the pattern within the footprint
+  tokenCount: number; // non-null cells in pattern
+  maxVP: number; // VP at 5 stars
+  maxMoney: number; // $ at 5 stars
+  // starThresholds[0] = min tokens for 1 star, ..., [4] = tokens for 5 star
+  starThresholds: [number, number, number, number, number];
+}
+
+// Published app record (tracked on player)
+export interface PublishedApp {
+  cardId: string;
+  name: string;
+  stars: number; // 1-5
+  vpEarned: number;
+  moneyEarned: number;
 }

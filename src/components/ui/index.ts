@@ -24,3 +24,13 @@ export { AiAugmentationModal } from './AiAugmentationModal';
 export { HelpIcon } from './HelpIcon';
 export { ActionPreviewPopover } from './ActionPreviewPopover';
 export { SuggestedActionsBanner } from './SuggestedActionsBanner';
+
+// Engineer visuals
+export { SpecialtyIcon } from './SpecialtyIcon';
+export { EngineerTooltipContent } from './EngineerTooltip';
+
+// Grid redesign components
+export { CodeGridView } from './CodeGridView';
+export { TechDebtBufferView } from './TechDebtBufferView';
+export { CodePoolView } from './CodePoolView';
+export { AppCardView } from './AppCardView';

@@ -230,9 +230,11 @@ function PersonaAuctionCard({ persona }: { persona: PersonaCard }) {
     <Card className="border-amber-600/50 bg-gradient-to-br from-gray-800 to-amber-900/20">
       <CardContent className="p-6">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-full bg-amber-700/50 flex items-center justify-center text-xl font-bold text-amber-300">
-            {persona.name.charAt(0)}
-          </div>
+          <img
+            src={`/personas/${persona.id}.png`}
+            alt={persona.name}
+            className="w-12 h-16 object-cover rounded-lg border border-amber-700/50"
+          />
           <div>
             <h3 className="text-xl font-bold text-white">{persona.name}</h3>
             <p className="text-sm text-amber-400">{eng.title}</p>

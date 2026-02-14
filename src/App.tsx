@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from './state/gameStore';
 import {
   SetupScreen,
@@ -13,6 +14,7 @@ import {
   EventPhase,
   RoundEnd,
   GameEnd,
+  ActionDraftPhase,
 } from './components/game';
 import { PuzzleGame } from './components/puzzle';
 import { GameRulesHeader } from './components/GameRulesHeader';
@@ -34,6 +36,8 @@ function App() {
         return <CorporationSelection />; // Legacy, kept for backwards compatibility
       case 'engineer-draft':
         return <EngineerDraft />;
+      case 'action-draft':
+        return <ActionDraftPhase />;
       case 'planning':
         return <PlanningPhase />;
       case 'reveal':
@@ -56,12 +60,22 @@ function App() {
   };
 
   // Hide standalone rules header during planning phase (rules button is in the turn banner)
-  const showRulesHeader = phase !== 'planning';
+  const showRulesHeader = phase !== 'planning' && phase !== 'action-draft';
 
   return (
     <div className="min-h-screen bg-gray-900">
       {showRulesHeader && <GameRulesHeader />}
-      {renderPhase()}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={phase}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          {renderPhase()}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

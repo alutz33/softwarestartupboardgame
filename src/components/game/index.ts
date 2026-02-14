@@ -11,3 +11,4 @@ export { ResolutionPhase } from './ResolutionPhase';
 export { EventPhase } from './EventPhase';
 export { RoundEnd } from './RoundEnd';
 export { GameEnd } from './GameEnd';
+export { ActionDraftPhase } from './ActionDraftPhase';
