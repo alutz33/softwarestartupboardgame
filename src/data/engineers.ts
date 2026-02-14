@@ -37,7 +37,7 @@ export function generateIntern(): Engineer {
     level: 'intern',
     specialty: undefined, // No specialty
     baseSalary: 5,
-    productivity: 0.3,
+    power: 1, // Intern = 1 power
   };
 }
 
@@ -46,13 +46,12 @@ export function generateEngineer(level: EngineerLevel): Engineer {
   const specialty = SPECIALTIES[Math.floor(Math.random() * SPECIALTIES.length)];
   const trait = generateTrait();
 
-  const baseProductivity = level === 'senior' ? 1.0 : 0.5;
-  const productivityVariance = (Math.random() - 0.5) * 0.2; // +/- 10%
-  let productivity = Math.round((baseProductivity + productivityVariance) * 100) / 100;
+  // Integer power: Senior = 4, Junior = 2
+  let power = level === 'senior' ? 4 : 2;
 
-  // AI Skeptic trait: +10% base productivity
+  // AI Skeptic trait: +1 base power (compensates for no AI)
   if (trait === 'ai-skeptic') {
-    productivity = Math.round((productivity * 1.1) * 100) / 100;
+    power += 1;
   }
 
   let baseSalary = level === 'senior' ? 30 : 15;
@@ -69,7 +68,7 @@ export function generateEngineer(level: EngineerLevel): Engineer {
     level,
     specialty,
     baseSalary: baseSalary + salaryVariance,
-    productivity,
+    power,
     trait,
   };
 }
@@ -95,33 +94,38 @@ export function generateEngineerPool(
     const isSenior = Math.random() < seniorRatio;
     const engineer = generateEngineer(isSenior ? 'senior' : 'junior');
 
-    // Later rounds have slightly better base stats
-    if (roundNumber > 1) {
-      engineer.productivity = Math.round((engineer.productivity + (roundNumber - 1) * 0.05) * 100) / 100;
+    // Later rounds: senior engineers may get +1 power bonus in round 4
+    if (roundNumber >= 4 && isSenior) {
+      engineer.power += 1;
     }
 
     pool.push(engineer);
   }
 
-  // Sort by a combination of level and productivity for display
+  // Sort by a combination of level and power for display
   pool.sort((a, b) => {
     if (a.level !== b.level) {
       return a.level === 'senior' ? -1 : 1;
     }
-    return b.productivity - a.productivity;
+    return b.power - a.power;
   });
 
   return pool;
 }
 
+// Returns flat +1 power bonus if specialty matches the action's primary type
 export function getSpecialtyBonus(specialty: Engineer['specialty'], actionType: string): number {
-  const bonuses: Record<string, Record<string, number>> = {
-    frontend: { 'develop-features': 0.2, 'marketing': 0.1 },
-    backend: { 'optimize-code': 0.2, 'upgrade-servers': 0.1 },
-    fullstack: { 'develop-features': 0.1, 'optimize-code': 0.1 },
-    devops: { 'upgrade-servers': 0.3, 'research-ai': 0.1 },
-    ai: { 'research-ai': 0.3, 'optimize-code': 0.1 },
+  const primaryBonuses: Record<string, string[]> = {
+    frontend: ['develop-features', 'marketing'],
+    backend: ['optimize-code', 'upgrade-servers'],
+    fullstack: ['develop-features', 'optimize-code'],
+    devops: ['upgrade-servers', 'research-ai'],
+    ai: ['research-ai', 'optimize-code'],
   };
 
-  return bonuses[specialty || 'fullstack']?.[actionType] || 0;
+  const actions = primaryBonuses[specialty || ''];
+  if (actions && actions.includes(actionType)) {
+    return 1; // Flat +1 power
+  }
+  return 0;
 }

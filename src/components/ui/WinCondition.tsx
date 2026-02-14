@@ -1,6 +1,25 @@
 import { motion } from 'framer-motion';
 import type { Player } from '../../types';
 
+function getDebtPenalty(techDebt: number): number {
+  if (techDebt >= 12) return -20;
+  if (techDebt >= 8) return -10;
+  if (techDebt >= 4) return -5;
+  return 0;
+}
+
+function estimateScore(player: Player): number {
+  let score = 0;
+  score += player.metrics.mau / 1000;
+  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 1.3 : 1;
+  score += (player.metrics.revenue / 500) * revenueMultiplier;
+  score += player.metrics.rating * 3;
+  score += getDebtPenalty(player.resources.techDebt);
+  score += player.productionTracks.mauProduction * 1;
+  score += player.productionTracks.revenueProduction * 2;
+  return Math.round(score);
+}
+
 interface WinConditionProps {
   players: Player[];
   currentRound: number;
@@ -9,15 +28,10 @@ interface WinConditionProps {
 
 export function WinCondition({ players, currentRound, totalRounds = 4 }: WinConditionProps) {
   // Calculate estimated scores for each player
-  const estimatedScores = players.map(player => {
-    let score = 0;
-    score += player.metrics.mau / 1000;
-    const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
-    score += (player.metrics.revenue / 500) * revenueMultiplier;
-    score += player.metrics.rating * 10;
-    if (player.resources.techDebt >= 7) score -= 10;
-    return { player, score: Math.round(score * 10) / 10 };
-  }).sort((a, b) => b.score - a.score);
+  const estimatedScores = players.map(player => ({
+    player,
+    score: estimateScore(player),
+  })).sort((a, b) => b.score - a.score);
 
   return (
     <motion.div
@@ -35,10 +49,11 @@ export function WinCondition({ players, currentRound, totalRounds = 4 }: WinCond
         <div className="text-gray-400 mb-1">Final Score =</div>
         <div className="space-y-1 text-gray-300">
           <div><span className="text-blue-400">MAU</span>/1000</div>
-          <div>+ <span className="text-green-400">Revenue</span>/500 <span className="text-gray-500">(x2 if Bootstrapped)</span></div>
-          <div>+ <span className="text-yellow-400">Rating</span> x 10</div>
+          <div>+ <span className="text-green-400">Revenue</span>/500 <span className="text-gray-500">(x1.3 if Bootstrapped)</span></div>
+          <div>+ <span className="text-yellow-400">Rating</span> x 3</div>
           <div>+ <span className="text-purple-400">Milestones</span></div>
-          <div>- <span className="text-red-400">Debt Penalty</span> <span className="text-gray-500">(if debt &ge;7)</span></div>
+          <div>+ <span className="text-cyan-400">MAU Prod</span> x 1 + <span className="text-cyan-400">Rev Prod</span> x 2</div>
+          <div>- <span className="text-red-400">Debt Penalty</span> <span className="text-gray-500">(4+: -5, 8+: -10, 12+: -20)</span></div>
         </div>
       </div>
 
@@ -84,11 +99,13 @@ interface ScoreBreakdownProps {
 
 export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownProps) {
   const mauPoints = Math.round((player.metrics.mau / 1000) * 10) / 10;
-  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 2 : 1;
+  const revenueMultiplier = player.strategy?.funding === 'bootstrapped' ? 1.3 : 1;
   const revenuePoints = Math.round((player.metrics.revenue / 500) * revenueMultiplier * 10) / 10;
-  const ratingPoints = Math.round(player.metrics.rating * 10 * 10) / 10;
-  const debtPenalty = player.resources.techDebt >= 7 ? -10 : 0;
-  const total = mauPoints + revenuePoints + ratingPoints + milestonePoints + debtPenalty;
+  const ratingPoints = player.metrics.rating * 3;
+  const debtPenalty = getDebtPenalty(player.resources.techDebt);
+  const mauProdBonus = player.productionTracks.mauProduction * 1;
+  const revProdBonus = player.productionTracks.revenueProduction * 2;
+  const total = Math.round(mauPoints + revenuePoints + ratingPoints + milestonePoints + debtPenalty + mauProdBonus + revProdBonus);
 
   return (
     <div className="bg-gray-800/50 rounded p-3 text-xs">
@@ -98,11 +115,11 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
 
         <span className="text-green-400">
           Revenue (${player.metrics.revenue})
-          {revenueMultiplier > 1 && <span className="text-gray-500"> x2</span>}:
+          {revenueMultiplier > 1 && <span className="text-gray-500"> x1.3</span>}:
         </span>
         <span className="text-right">+{revenuePoints}</span>
 
-        <span className="text-yellow-400">Rating ({player.metrics.rating.toFixed(1)}):</span>
+        <span className="text-yellow-400">Rating ({player.metrics.rating}/10):</span>
         <span className="text-right">+{ratingPoints}</span>
 
         {milestonePoints > 0 && (
@@ -112,15 +129,21 @@ export function ScoreBreakdown({ player, milestonePoints = 0 }: ScoreBreakdownPr
           </>
         )}
 
+        <span className="text-cyan-400">MAU Prod ({player.productionTracks.mauProduction}):</span>
+        <span className="text-right">+{mauProdBonus}</span>
+
+        <span className="text-cyan-400">Rev Prod ({player.productionTracks.revenueProduction}):</span>
+        <span className="text-right">+{revProdBonus}</span>
+
         {debtPenalty < 0 && (
           <>
-            <span className="text-red-400">Debt Penalty:</span>
+            <span className="text-red-400">Debt Penalty ({player.resources.techDebt}):</span>
             <span className="text-right text-red-400">{debtPenalty}</span>
           </>
         )}
 
         <span className="text-white font-bold border-t border-gray-700 pt-1">Total:</span>
-        <span className="text-right text-white font-bold border-t border-gray-700 pt-1">{Math.round(total * 10) / 10}</span>
+        <span className="text-right text-white font-bold border-t border-gray-700 pt-1">{total}</span>
       </div>
     </div>
   );

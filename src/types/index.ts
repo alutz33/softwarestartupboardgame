@@ -19,6 +19,24 @@ export interface Resources {
 }
 
 // ============================================
+// PRODUCTION TRACKS (Mars-style)
+// ============================================
+// Each player has production markers that slide along tracks.
+// At the start of each round, players produce resources equal to their marker positions.
+
+export interface ProductionTracks {
+  mauProduction: number;       // 0-20: produces N × 200 MAU per round
+  revenueProduction: number;   // 0-15: produces N × $5 income per round
+}
+
+export const PRODUCTION_CONSTANTS = {
+  MAU_PER_PRODUCTION: 200,      // Each point of MAU production = +200 MAU
+  MONEY_PER_PRODUCTION: 5,      // Each point of revenue production = +$5
+  MAX_MAU_PRODUCTION: 20,
+  MAX_REVENUE_PRODUCTION: 15,
+} as const;
+
+// ============================================
 // CORPORATION / STRATEGY SELECTION
 // ============================================
 
@@ -122,10 +140,10 @@ export type EngineerLevel = 'junior' | 'senior' | 'intern';
 // ============================================
 
 export type EngineerTraitType =
-  | 'ai-skeptic'      // Cannot use AI augmentation, +10% base productivity
-  | 'equity-hungry'   // Costs +$5, +20% productivity if retained 2+ rounds
+  | 'ai-skeptic'      // Cannot use AI augmentation, +1 base power
+  | 'equity-hungry'   // Costs +$5, +1 power if retained 2+ rounds
   | 'startup-veteran' // Immune to event penalties
-  | 'night-owl';      // +30% on last action assigned each round
+  | 'night-owl';      // +1 power on last action assigned each round
 
 export interface EngineerTrait {
   id: EngineerTraitType;
@@ -137,12 +155,12 @@ export const ENGINEER_TRAITS: Record<EngineerTraitType, EngineerTrait> = {
   'ai-skeptic': {
     id: 'ai-skeptic',
     name: 'AI Skeptic',
-    description: 'Cannot use AI augmentation, but +10% base productivity',
+    description: 'Cannot use AI augmentation, but +1 base power',
   },
   'equity-hungry': {
     id: 'equity-hungry',
     name: 'Equity-Hungry',
-    description: 'Costs +$5 salary, +20% productivity if retained 2+ rounds',
+    description: 'Costs +$5 salary, +1 power if retained 2+ rounds',
   },
   'startup-veteran': {
     id: 'startup-veteran',
@@ -152,7 +170,7 @@ export const ENGINEER_TRAITS: Record<EngineerTraitType, EngineerTrait> = {
   'night-owl': {
     id: 'night-owl',
     name: 'Night Owl',
-    description: '+30% on last action assigned each round',
+    description: '+1 power on last action assigned each round',
   },
 };
 
@@ -162,8 +180,12 @@ export interface Engineer {
   level: EngineerLevel;
   specialty?: 'frontend' | 'backend' | 'fullstack' | 'devops' | 'ai';
   baseSalary: number;
-  productivity: number; // output multiplier
-  trait?: EngineerTraitType; // Optional unique trait
+  power: number; // integer power: intern=1, junior=2, senior=4
+  trait?: EngineerTraitType; // Optional generic trait (for generic engineers)
+  // Phase 2: Persona engineer fields
+  isPersona?: boolean;                // true if this is a persona engineer (from dual-sided card)
+  personaId?: PersonaId;              // Which persona card this engineer came from
+  personaTrait?: PersonaEngineerTrait; // Unique named trait (for persona engineers)
 }
 
 export interface HiredEngineer extends Engineer {
@@ -205,8 +227,11 @@ export interface ActionSpace {
 export interface ActionEffect {
   mauChange?: number;
   revenueChange?: number;
-  ratingChange?: number;
+  ratingChange?: number;           // Integer: +1, -1, +2, -2
   resourceChanges?: Partial<Resources>;
+  // Production track deltas (Mars-style)
+  mauProductionDelta?: number;     // How much to move MAU production marker
+  revenueProductionDelta?: number; // How much to move Revenue production marker
   triggersMinigame?: boolean;
   special?: string;
 }
@@ -323,13 +348,100 @@ export interface PuzzleBonus {
 }
 
 // ============================================
+// SPRINT MINI-GAME (Push-Your-Luck)
+// ============================================
+// Replaces coding puzzle with Quacks of Quedlinburg-style token drawing
+
+export type SprintTokenType = 'clean-code-1' | 'clean-code-2' | 'bug' | 'critical-bug';
+
+export interface SprintToken {
+  id: string;
+  type: SprintTokenType;
+  name: string;
+  value: number;       // Clean code points (positive) or 0 for bugs
+  isBug: boolean;      // true for bug and critical-bug
+  isCritical: boolean; // true only for critical-bug (counts as 2 bugs)
+}
+
+export interface SprintPlayerState {
+  playerId: string;
+  drawnTokens: SprintToken[];
+  cleanCodeTotal: number;   // Sum of clean code values
+  bugCount: number;          // Number of bugs drawn (critical = 2)
+  hasCrashed: boolean;       // true if bugCount >= 3
+  hasStopped: boolean;       // true if player chose to stop
+  maxDraws: number;          // Based on engineer count: 1->5, 2->7, 3->9
+  hasBackendRevert: boolean; // true if player has backend specialty (1 free bug ignore)
+  usedBackendRevert: boolean; // true if free revert was used
+  isParticipant: boolean;    // true if player assigned engineers to Optimize Code
+}
+
+export interface SprintState {
+  tokenBag: SprintToken[];       // Remaining tokens in the bag
+  playerStates: SprintPlayerState[];
+  currentPlayerIndex: number;    // Which player is currently drawing
+  isComplete: boolean;           // All players done
+  drawOrder: string[];           // Player IDs in drawing order
+}
+
+// ============================================
+// QUARTERLY THEMES (Market Conditions)
+// ============================================
+
+export type QuarterlyThemeId =
+  | 'startup-boom'
+  | 'market-expansion'
+  | 'the-reckoning'
+  | 'ipo-window'
+  | 'ai-gold-rush'
+  | 'talent-war'
+  | 'regulatory-crackdown'
+  | 'bubble-market';
+
+export interface ThemeModifier {
+  actionCostMultiplier?: Partial<Record<ActionType, number>>;  // Multiply action costs
+  actionOutputMultiplier?: Partial<Record<ActionType, number>>; // Multiply action output
+  globalEffects?: {
+    salaryChange?: number;        // +/- to all salaries
+    incomeBonus?: number;         // Flat income bonus
+    extraDraftEngineers?: number; // Extra engineers in pool
+    debtPenaltyMultiplier?: number; // Multiply debt penalties
+  };
+  restrictedActions?: ActionType[];  // Actions unavailable this quarter
+  bonusActions?: ActionType[];       // Actions that give bonus output
+}
+
+export interface QuarterlyTheme {
+  id: QuarterlyThemeId;
+  name: string;
+  description: string;
+  flavor: string;         // Thematic text
+  modifiers: ThemeModifier;
+}
+
+// ============================================
+// SEQUENTIAL ACTION DRAFT (Phase 3)
+// ============================================
+
+export type PlanningMode = 'sequential' | 'simultaneous';
+
+export interface SequentialDraftState {
+  pickOrder: string[];          // Snake draft order of player IDs
+  currentPickerIndex: number;   // Who picks next
+  picksPerRound: number;        // Total picks in this draft round
+  picksCompleted: number;       // How many picks done
+  isComplete: boolean;          // All picks done
+  timeoutSeconds: number;       // Per-pick timer (0 = no timer)
+}
+
+// ============================================
 // PLAYER STATE
 // ============================================
 
 export interface PlayerMetrics {
   mau: number;
   revenue: number;
-  rating: number; // 1-5 scale
+  rating: number; // 1-10 integer scale (no decimals)
 }
 
 export interface Player {
@@ -338,14 +450,17 @@ export interface Player {
   color: string;
   isReady: boolean;
   strategy?: CorporationStrategy;
-  startupCard?: StartupCard; // The startup card this player selected
+  startupCard?: StartupCard; // The startup card this player selected (legacy)
+  leader?: PersonaCard; // Phase 2: The persona card chosen as CEO/Founder
   resources: Resources;
   metrics: PlayerMetrics;
+  productionTracks: ProductionTracks; // Mars-style production markers
   engineers: HiredEngineer[];
   plannedActions: PlannedAction[];
   hasRecruiterBonus: boolean;
   synergiesUnlocked: string[];
-  // Corporation power tracking
+  // Leader/Corporation power tracking
+  leaderPowerUsed: boolean; // Whether the once-per-game leader power has been used
   powerUsesRemaining: number; // For limited-use powers like Pivot
   hasPivoted: boolean; // Track if VC-Heavy has used their pivot
   // IPO/Acquisition tracking for late-game actions
@@ -358,29 +473,54 @@ export interface Player {
 
 export type GamePhase =
   | 'setup'
-  | 'startup-draft'           // New: Terraforming Mars-style startup card selection
+  | 'leader-draft'            // Phase 2: Pick 1 of 3 persona cards as your Leader/CEO
+  | 'funding-selection'       // Phase 2: Choose Funding Type after leader pick
+  | 'startup-draft'           // Legacy: Terraforming Mars-style startup card selection
   | 'corporation-selection'   // Legacy: kept for backwards compatibility
   | 'engineer-draft'
   | 'planning'
   | 'reveal'
   | 'puzzle'
+  | 'sprint'                    // Phase 3: Push-your-luck sprint mini-game
   | 'resolution'
   | 'event'
   | 'round-end'
   | 'game-end';
 
+// Persona auction state (for mini-auctions during engineer draft)
+export interface PersonaAuctionState {
+  personaCard: PersonaCard;         // The persona being auctioned
+  currentBid: number;               // Current highest bid
+  currentBidderId?: string;         // Player ID of current highest bidder
+  passedPlayers: string[];          // Players who have passed
+  biddingOrder: string[];           // Order of bidding (lowest MAU first)
+  currentBidderIndex: number;       // Index into biddingOrder
+  isComplete: boolean;              // Whether auction is resolved
+}
+
+// Draft sub-phase for hybrid auction system (Phase 4)
+export type DraftPhase = 'generic-draft' | 'persona-auction' | 'complete';
+
 export interface RoundState {
   roundNumber: number;
   phase: GamePhase;
   engineerPool: Engineer[];
+  personaPool: PersonaCard[];       // Phase 2: Persona engineers available this round for auction
   currentBids: Map<string, Bid>; // engineerId -> bid
   bidResults: BidResult[];
   currentEvent?: GameEvent;
   upcomingEvent?: GameEvent; // EVENT FORECASTING: Show next round's event during planning
   currentPuzzle?: Puzzle;
   puzzleResults?: PuzzleResult;
+  sprintState?: SprintState;
+  sequentialDraft?: SequentialDraftState;
+  activeTheme?: QuarterlyTheme;
   occupiedActions: Map<ActionType, string[]>; // action -> array of playerIds who have claimed it
   draftOrder: string[]; // player IDs in draft order (lowest MAU first for catch-up)
+  personaAuction?: PersonaAuctionState; // Active persona auction
+  // Phase 4: Hybrid auction draft tracking
+  draftPhase?: DraftPhase;              // Which sub-phase of the draft we're in
+  currentDraftPickerIndex?: number;     // Index into draftOrder for whose turn it is to pick
 }
 
 // ============================================
@@ -403,7 +543,7 @@ export interface Milestone {
 // Milestone definitions (conditions checked in gameStore)
 export const MILESTONE_DEFINITIONS = [
   { id: 'first-5k-mau', name: 'First to 5K Users', description: 'First player to reach 5,000 MAU', bonus: 10 },
-  { id: 'first-5-rating', name: 'Five Star Startup', description: 'First player to achieve 5.0 rating', bonus: 15 },
+  { id: 'first-9-rating', name: 'Five Star Startup', description: 'First player to achieve 9+ rating (5 stars)', bonus: 15 },
   { id: 'first-debt-free', name: 'Clean Code Club', description: 'First player to have 0 tech debt (after having debt)', bonus: 10 },
   { id: 'first-10k-mau', name: 'Growth Hacker', description: 'First player to reach 10,000 MAU', bonus: 15 },
   { id: 'revenue-leader', name: 'Revenue King', description: 'First player to reach $1,000 revenue', bonus: 12 },
@@ -420,9 +560,14 @@ export interface GameState {
   eventDeck: GameEvent[];
   usedEvents: GameEvent[];
   milestones: Milestone[]; // Track claimed milestones
-  // Startup card draft
+  quarterlyThemes: QuarterlyTheme[];
+  planningMode: PlanningMode;
+  // Startup card draft (legacy)
   startupDeck: StartupCard[];
   dealtStartupCards: Map<string, StartupCard[]>; // playerId -> dealt cards
+  // Phase 2: Persona card system
+  personaDeck: PersonaCard[];          // Remaining persona cards (shuffled into engineer pool)
+  dealtLeaderCards: Map<string, PersonaCard[]>; // playerId -> dealt leader cards (pick 1 of 3)
   winner?: string;
   finalScores?: Map<string, number>;
 }
@@ -446,7 +591,10 @@ export type GameAction =
   | { type: 'RESOLVE_ACTIONS' }
   | { type: 'APPLY_EVENT' }
   | { type: 'END_ROUND' }
-  | { type: 'CALCULATE_WINNER' };
+  | { type: 'CALCULATE_WINNER' }
+  | { type: 'DRAW_SPRINT_TOKEN'; playerId: string }
+  | { type: 'STOP_SPRINT'; playerId: string }
+  | { type: 'CLAIM_ACTION_SLOT'; playerId: string; engineerId: string; action: ActionType; useAi: boolean };
 
 // ============================================
 // UI STATE
@@ -470,26 +618,24 @@ export interface Notification {
 }
 
 // ============================================
-// TECH DEBT EFFECTS
+// TECH DEBT EFFECTS (Integer-based)
 // ============================================
 
 export interface TechDebtLevel {
   min: number;
   max: number;
-  efficiencyMultiplier: number;  // 0.3 to 1.0 - applied to ALL action outputs
-  ratingPenalty: number;
-  blocksDevelopment: boolean;    // blocks develop-features and optimize-code
-  // Legacy fields kept for reference
-  featureBreakChance: number;
-  forcedDebtPayment: number;
+  powerPenalty: number;             // Flat power reduction for ALL engineers (-1 per 4 debt)
+  mauProductionPenalty: number;     // Penalty to MAU production track
+  revenueProductionPenalty: number; // Penalty to Revenue production track
+  ratingPenalty: number;            // Integer penalty to rating
+  blocksDevelopment: boolean;       // Blocks develop-features and optimize-code
 }
 
 export const TECH_DEBT_LEVELS: TechDebtLevel[] = [
-  { min: 0, max: 3, efficiencyMultiplier: 1.0, ratingPenalty: 0, blocksDevelopment: false, featureBreakChance: 0, forcedDebtPayment: 0 },
-  { min: 4, max: 6, efficiencyMultiplier: 0.85, ratingPenalty: 0.2, blocksDevelopment: false, featureBreakChance: 0, forcedDebtPayment: 0 },
-  { min: 7, max: 9, efficiencyMultiplier: 0.70, ratingPenalty: 0.3, blocksDevelopment: false, featureBreakChance: 0.2, forcedDebtPayment: 0 },
-  { min: 10, max: 12, efficiencyMultiplier: 0.50, ratingPenalty: 0.5, blocksDevelopment: true, featureBreakChance: 0.4, forcedDebtPayment: 0.5 },
-  { min: 13, max: Infinity, efficiencyMultiplier: 0.30, ratingPenalty: 0.5, blocksDevelopment: true, featureBreakChance: 0.6, forcedDebtPayment: 0.75 },
+  { min: 0, max: 3, powerPenalty: 0, mauProductionPenalty: 0, revenueProductionPenalty: 0, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 4, max: 7, powerPenalty: -1, mauProductionPenalty: -1, revenueProductionPenalty: 0, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 8, max: 11, powerPenalty: -2, mauProductionPenalty: -1, revenueProductionPenalty: -1, ratingPenalty: 0, blocksDevelopment: false },
+  { min: 12, max: Infinity, powerPenalty: -3, mauProductionPenalty: -2, revenueProductionPenalty: -1, ratingPenalty: -1, blocksDevelopment: true },
 ];
 
 // Helper function to get current tech debt level
@@ -498,21 +644,146 @@ export function getTechDebtLevel(techDebt: number): TechDebtLevel {
 }
 
 // ============================================
-// AI AUGMENTATION TABLE
+// AI AUGMENTATION (Integer Power System)
 // ============================================
+// AI augmentation adds +2 power (flat) but generates tech debt.
+// Debt generated depends on engineer level (seniors are more careful with AI).
 
-export interface AiAugmentationResult {
+export const AI_POWER_BONUS = 2; // Flat +2 power from AI augmentation
+
+export interface AiDebtByLevel {
   engineerLevel: EngineerLevel;
-  hasAi: boolean;
-  outputMultiplier: number;
   techDebtGenerated: number;
 }
 
-export const AI_AUGMENTATION_TABLE: AiAugmentationResult[] = [
-  { engineerLevel: 'intern', hasAi: false, outputMultiplier: 0.3, techDebtGenerated: 1 },
-  { engineerLevel: 'intern', hasAi: true, outputMultiplier: 0.6, techDebtGenerated: 4 },
-  { engineerLevel: 'junior', hasAi: false, outputMultiplier: 0.5, techDebtGenerated: 1 },
-  { engineerLevel: 'senior', hasAi: false, outputMultiplier: 1.0, techDebtGenerated: 0 },
-  { engineerLevel: 'junior', hasAi: true, outputMultiplier: 1.0, techDebtGenerated: 3 },
-  { engineerLevel: 'senior', hasAi: true, outputMultiplier: 1.5, techDebtGenerated: 1 },
+export const AI_DEBT_TABLE: AiDebtByLevel[] = [
+  { engineerLevel: 'intern', techDebtGenerated: 4 },
+  { engineerLevel: 'junior', techDebtGenerated: 3 },
+  { engineerLevel: 'senior', techDebtGenerated: 1 },
 ];
+
+export function getAiDebt(level: EngineerLevel): number {
+  return AI_DEBT_TABLE.find(e => e.engineerLevel === level)?.techDebtGenerated ?? 2;
+}
+
+// ============================================
+// PERSONA CARDS (Dual-Sided: Leader / Engineer)
+// ============================================
+// Each persona card has two sides:
+// - Leader side: used during game setup (CEO/Founder identity)
+// - Engineer side: used during gameplay (premium hire in draft pool)
+
+export type PersonaId =
+  | 'william-doors'
+  | 'steeve-careers'
+  | 'elom-tusk'
+  | 'jess-bezos'
+  | 'mark-zucker'
+  | 'lora-page'
+  | 'susan-fry'
+  | 'satoshi-nakamaybe'
+  | 'jensen-wattson'
+  | 'sam-chatman'
+  | 'silica-su'
+  | 'binge-hastings'
+  | 'whitney-buzz-herd'
+  | 'marc-cloudoff'
+  | 'gabe-newdeal'
+  | 'jack-blocksey'
+  | 'grace-debugger'
+  | 'brian-spare-key';
+
+// Leader power IDs for the once-per-game abilities
+export type LeaderPowerId =
+  | 'blue-screen-protocol'     // William Doors: opponents skip Optimize Code
+  | 'reality-distortion-field' // Steeve Careers: double all engineer output
+  | 'meme-power'               // Elom Tusk: Go Viral auto-succeeds
+  | 'prime-day'                // Jess Bezos: 3x monetization revenue
+  | 'data-harvest'             // Mark Zucker: steal 2 MAU production
+  | 'moonshot-lab'             // Lora Page: 3x Research AI, no debt
+  | 'ipo-fast-track'           // Susan Fry: score Rev Production x 5
+  | 'decentralize'             // Satoshi: opponents +2 tech debt
+  | 'gpu-tax'                  // Jensen: opponents using AI pay you $5
+  | 'safety-pause'             // Sam Chatman: opponents can't use AI
+  | 'roadmap-execution'        // Silica Su: double Develop Features output
+  | 'binge-drop'               // Binge Hastings: double Develop Features
+  | 'first-move'               // Whitney: claim action slot first
+  | 'acquisition-spree'        // Marc Cloudoff: steal an engineer
+  | 'steam-sale'               // Gabe Newdeal: opponents lose $10
+  | 'dual-pivot'               // Jack Blocksey: change product + extra action
+  | 'compiler-overhaul'        // Grace Debugger: tech debt to zero
+  | 'surge-pricing';           // Brian Spare-key: 3x monetization + rating
+
+// Passive effect IDs (always-on abilities for leaders)
+export type LeaderPassiveId =
+  | 'enterprise-culture'       // William Doors: +1 power on Develop Features
+  | 'perfectionist'            // Steeve Careers: +1 rating every round
+  | 'hype-machine'             // Elom Tusk: +500 MAU any action, ±200 variance
+  | 'infrastructure-empire'    // Jess Bezos: +2 server capacity/round
+  | 'network-effects'          // Mark Zucker: +500 MAU when anyone uses Marketing
+  | 'efficient-ai'             // Lora Page: AI generates 50% less debt
+  | 'ad-network'               // Susan Fry: +$5 income/round
+  | 'immutable-ledger'         // Satoshi: no Marketing, immune to Data Breach
+  | 'gpu-royalties'            // Jensen: Research AI gives +1 AI capacity
+  | 'alignment-tax'            // Sam Chatman: AI no debt, -1 rating if AI used
+  | 'lean-efficiency'          // Silica Su: engineer hiring -$5
+  | 'subscriber-loyalty'       // Binge Hastings: +1 Rev Prod if rating 6+
+  | 'trust-safety'             // Whitney: rating floor 4, Marketing +1 rating
+  | 'saas-compounding'         // Marc Cloudoff: Monetization +1 Rev Prod
+  | 'marketplace-tax'          // Gabe Newdeal: +$3 per opponent Develop Features
+  | 'dual-focus'               // Jack Blocksey: two exclusive actions/round
+  | 'double-optimize'          // Grace Debugger: Optimize Code gives +2 rating
+  | 'crisis-resilience';       // Brian Spare-key: gain MAU when opponents market
+
+export interface LeaderPower {
+  id: LeaderPowerId;
+  name: string;
+  description: string;
+}
+
+export interface LeaderPassive {
+  id: LeaderPassiveId;
+  name: string;
+  description: string;
+}
+
+export interface LeaderStartingBonus {
+  money?: number;              // Extra starting money
+  mauProduction?: number;      // Starting MAU production track position
+  revenueProduction?: number;  // Starting Revenue production track position
+  rating?: number;             // Override starting rating
+  aiCapacity?: number;         // Extra AI capacity
+  techDebt?: number;           // Override starting tech debt
+  serverCapacity?: number;     // Extra server capacity
+}
+
+export interface LeaderSide {
+  title: string;               // e.g. "Founder & Chairman"
+  flavor: string;              // Flavor text quote
+  startingBonus: LeaderStartingBonus;
+  productLock: ProductType[];  // Which product types this leader allows
+  power: LeaderPower;          // Once-per-game ability
+  passive: LeaderPassive;      // Always-on ability
+}
+
+// Unique named trait for persona engineers (different from generic traits)
+export interface PersonaEngineerTrait {
+  name: string;                // e.g. "Philanthropist", "Perfectionist"
+  description: string;         // What the trait does
+}
+
+export interface PersonaEngineerSide {
+  title: string;               // e.g. "Senior Software Architect"
+  flavor: string;              // Flavor text quote
+  level: EngineerLevel;        // Always 'senior' (4 power) for persona engineers
+  power: number;               // Base power (always 4)
+  specialty: Engineer['specialty']; // Fixed specialty
+  trait: PersonaEngineerTrait; // Unique named trait (always present)
+}
+
+export interface PersonaCard {
+  id: PersonaId;
+  name: string;                // Display name e.g. "William Doors"
+  leaderSide: LeaderSide;
+  engineerSide: PersonaEngineerSide;
+}

@@ -14,6 +14,37 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
     steps: ['Select 2-4 players', 'Click Start Game'],
     tips: ['More players = more competition for action slots!'],
   },
+  'leader-draft': {
+    title: 'Choose Your Leader',
+    emoji: 'Choose Your Leader',
+    description: 'Pick a tech mogul to lead your startup. Each leader has unique powers!',
+    steps: [
+      '1. Review your 3 leader cards',
+      '2. Compare starting bonuses and product locks',
+      '3. Check their once-per-game power',
+      '4. Select one as your CEO/Founder',
+    ],
+    tips: [
+      'Your leader determines your product type',
+      'Unchosen leaders become premium engineers in the draft',
+      'Leader passives are active all game long',
+    ],
+  },
+  'funding-selection': {
+    title: 'Choose Funding',
+    emoji: 'Choose Funding',
+    description: 'Pick your funding strategy to complement your leader.',
+    steps: [
+      '1. Review the three funding types',
+      '2. Consider starting cash vs. special bonuses',
+      '3. Select your funding and confirm',
+    ],
+    tips: [
+      'VC-Heavy: Most cash but only 40% equity',
+      'Bootstrapped: Least cash but revenue scores 2x',
+      'Angel-Backed: Balanced, extra draft picks',
+    ],
+  },
   'startup-draft': {
     title: 'Choose Your Startup',
     emoji: 'Choose Your Startup',
@@ -101,6 +132,23 @@ const phaseInfo: Record<GamePhase, { title: string; emoji: string; description: 
       'LOOP blocks are very efficient',
       'Winner gets -2 tech debt!',
       'Fewer blocks = higher score',
+    ],
+  },
+  'sprint': {
+    title: 'Sprint Mini-Game',
+    emoji: 'Sprint Mini-Game',
+    description: 'Push your luck! Draw tokens from the bag for clean code, but watch out for bugs.',
+    steps: [
+      '1. Draw tokens from the shared bag',
+      '2. Clean code tokens add to your score',
+      '3. Bugs accumulate - 3 bugs and you crash!',
+      '4. Stop anytime to bank your clean code points',
+    ],
+    tips: [
+      'More engineers = more draws allowed',
+      'Backend specialists get one free bug revert',
+      'Critical bugs count as 2 regular bugs',
+      'Crashing loses ALL your clean code progress',
     ],
   },
   'resolution': {

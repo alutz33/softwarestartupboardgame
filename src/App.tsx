@@ -1,11 +1,14 @@
 import { useGameStore } from './state/gameStore';
 import {
   SetupScreen,
+  LeaderDraft,
+  FundingSelection,
   CorporationSelection,
   StartupCardDraft,
   EngineerDraft,
   PlanningPhase,
   RevealPhase,
+  SprintPhase,
   ResolutionPhase,
   EventPhase,
   RoundEnd,
@@ -21,6 +24,10 @@ function App() {
     switch (phase) {
       case 'setup':
         return <SetupScreen />;
+      case 'leader-draft':
+        return <LeaderDraft />;
+      case 'funding-selection':
+        return <FundingSelection />;
       case 'startup-draft':
         return <StartupCardDraft />;
       case 'corporation-selection':
@@ -33,6 +40,8 @@ function App() {
         return <RevealPhase />;
       case 'puzzle':
         return <PuzzleGame />;
+      case 'sprint':
+        return <SprintPhase />;
       case 'resolution':
         return <ResolutionPhase />;
       case 'event':
@@ -46,9 +55,12 @@ function App() {
     }
   };
 
+  // Hide standalone rules header during planning phase (rules button is in the turn banner)
+  const showRulesHeader = phase !== 'planning';
+
   return (
     <div className="min-h-screen bg-gray-900">
-      <GameRulesHeader />
+      {showRulesHeader && <GameRulesHeader />}
       {renderPhase()}
     </div>
   );
